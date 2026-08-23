@@ -1,0 +1,6 @@
+[submodule "openssl"]
+	path = third_party/openssl/src
+	url = https://github.com/openssl/openssl.git
+[submodule "sqlcipher"]
+	path = third_party/sqlcipher/src
+	url = https://github.com/sqlcipher/sqlcipher.git
