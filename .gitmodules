@@ -4,3 +4,6 @@
 [submodule "sqlcipher"]
 	path = third_party/sqlcipher/src
 	url = https://github.com/sqlcipher/sqlcipher.git
+[submodule "zlib"]
+	path = third_party/zlib/src
+	url = https://github.com/madler/zlib.git
