@@ -6,8 +6,11 @@ for %%I in ("%SCRIPT_DIR%..\..") do set "PROJECT_ROOT=%%~fI"
 
 set "OPENSSL_SRC=%SCRIPT_DIR%src"
 set "OPENSSL_BUILD_ROOT=%PROJECT_ROOT%\build\openssl"
+set "BROTLI_BUILD_ROOT=%PROJECT_ROOT%\build\brotli"
 set "EXPECTED_OPENSSL_COMMIT=8cf17aaeb4599f8af87fefd810b5b5fee90fe69e"
 set "EXPECTED_OPENSSL_TAG=openssl-3.5.7"
+set "EXPECTED_BROTLI_COMMIT=028fb5a23661f123017c060daa546b55cf4bde29"
+set "EXPECTED_BROTLI_TAG=v1.2.0"
 set "REQUIRED_WINDOWS_SDK=10.0.22621.0"
 
 set "BUILD_CONFIG=all"
@@ -138,6 +141,8 @@ call :require_tool dumpbin.exe "Install the Visual Studio 2022 MSVC v143 x64/x86
 if errorlevel 1 exit /b 1
 call :require_tool certutil.exe "certutil.exe is required to record staged DLL SHA-256 hashes."
 if errorlevel 1 exit /b 1
+call :require_tool fc.exe "Windows fc.exe is required to compare staged Brotli runtime DLLs."
+if errorlevel 1 exit /b 1
 if /i "!TEST_MODE!"=="full" (
     call :require_tool powershell.exe "Windows PowerShell is required for the IPv6 UDP preflight used by full tests."
     if errorlevel 1 exit /b 1
@@ -187,7 +192,18 @@ perl -e "print qq([OpenSSL] Perl: $^V\n)"
 nasm -v
 echo.
 
+set "TOOLCHAIN_PATH=!PATH!"
+
 if "!CHECK_ONLY!"=="1" (
+    if /i "!BUILD_CONFIG!"=="all" (
+        call :validate_brotli_stage debug
+        if errorlevel 1 exit /b 1
+        call :validate_brotli_stage release
+        if errorlevel 1 exit /b 1
+    ) else (
+        call :validate_brotli_stage !BUILD_CONFIG!
+        if errorlevel 1 exit /b 1
+    )
     echo [OpenSSL] Environment check completed successfully. No build was performed.
     exit /b 0
 )
@@ -223,6 +239,11 @@ if /i "!CURRENT_CONFIG!"=="debug" (
 set "CURRENT_BUILD_DIR=!OPENSSL_BUILD_ROOT!\x64-!CURRENT_CONFIG!"
 set "CURRENT_WORK_DIR=!CURRENT_BUILD_DIR!\work"
 set "CURRENT_STAGE_DIR=!CURRENT_BUILD_DIR!\stage"
+
+call :validate_brotli_stage !CURRENT_CONFIG!
+if errorlevel 1 exit /b 1
+set "PATH=!CURRENT_BROTLI_STAGE!\bin;!TOOLCHAIN_PATH!"
+set "BROTLI_INCLUDE_DIR=!CURRENT_BROTLI_STAGE!\include"
 
 echo.
 echo ================================================================================
@@ -260,6 +281,8 @@ if "!NEEDS_CONFIGURE!"=="1" (
     perl "!OPENSSL_SRC!\Configure" VC-WIN64A ^
         shared ^
         !CONFIGURE_MODE! ^
+        enable-brotli-dynamic ^
+        --with-brotli-include="!BROTLI_INCLUDE_DIR!" ^
         --prefix="!CURRENT_STAGE_DIR!" ^
         --openssldir="!CURRENT_STAGE_DIR!\ssl" ^
         --libdir=lib ^
@@ -274,6 +297,12 @@ if "!NEEDS_CONFIGURE!"=="1" (
     echo [OpenSSL] Add clean to regenerate it with the script's pinned options.
 )
 
+call :verify_brotli_configuration
+if errorlevel 1 (
+    popd
+    exit /b 1
+)
+
 echo [OpenSSL] Compiling !CURRENT_CONFIG!...
 nmake
 if errorlevel 1 (
@@ -282,6 +311,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set "BROTLI_INTEGRATION_TESTS=not run"
 if /i "!TEST_MODE!"=="safe" (
     echo [OpenSSL] Running safe test suite; test_bio_dgram is excluded.
     nmake TESTS="-test_bio_dgram" VFP=1 test
@@ -309,6 +339,17 @@ if /i "!TEST_MODE!"=="safe" (
     echo [OpenSSL] WARNING: Tests are skipped for !CURRENT_CONFIG!.
 )
 
+if /i not "!TEST_MODE!"=="none" (
+    echo [OpenSSL] Running focused Brotli BIO and certificate-compression tests...
+    nmake TESTS="test_bio_comp test_cert_comp test_tls13certcomp" VFP=1 test
+    if errorlevel 1 (
+        echo ERROR: Focused OpenSSL Brotli integration tests failed for !CURRENT_CONFIG!.
+        popd
+        exit /b 1
+    )
+    set "BROTLI_INTEGRATION_TESTS=passed"
+)
+
 echo [OpenSSL] Installing software into the project stage...
 nmake install_sw
 if errorlevel 1 (
@@ -323,6 +364,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo [OpenSSL] Deploying the matching Brotli runtime DLLs into the OpenSSL stage...
+for %%L in (brotlicommon brotlidec brotlienc) do (
+    copy /y "!CURRENT_BROTLI_STAGE!\bin\%%L.dll" "!CURRENT_STAGE_DIR!\bin\%%L.dll" >nul
+    if errorlevel 1 (
+        echo ERROR: Failed to stage %%L.dll from !CURRENT_BROTLI_STAGE!.
+        popd
+        exit /b 1
+    )
+)
+
 popd
 
 call :verify_stage "!CURRENT_CONFIG!" "!CURRENT_STAGE_DIR!"
@@ -332,6 +383,100 @@ call :write_manifest "!CURRENT_CONFIG!" "!CURRENT_STAGE_DIR!"
 if errorlevel 1 exit /b 1
 
 echo [OpenSSL] !CURRENT_CONFIG! build and stage verification completed.
+exit /b 0
+
+:validate_brotli_stage
+set "BROTLI_CONFIG=%~1"
+set "BROTLI_CONFIG_TITLE=Release"
+set "BROTLI_EXPECTED_CRT=/MD"
+if /i "!BROTLI_CONFIG!"=="debug" (
+    set "BROTLI_CONFIG_TITLE=Debug"
+    set "BROTLI_EXPECTED_CRT=/MDd"
+) else if /i not "!BROTLI_CONFIG!"=="release" (
+    echo ERROR: Internal error: unsupported Brotli configuration !BROTLI_CONFIG!.
+    exit /b 1
+)
+
+set "CURRENT_BROTLI_STAGE=!BROTLI_BUILD_ROOT!\x64-!BROTLI_CONFIG!\stage"
+set "BROTLI_MANIFEST=!CURRENT_BROTLI_STAGE!\build-manifest.txt"
+
+for %%F in (
+    "!CURRENT_BROTLI_STAGE!\bin\brotlicommon.dll"
+    "!CURRENT_BROTLI_STAGE!\bin\brotlidec.dll"
+    "!CURRENT_BROTLI_STAGE!\bin\brotlienc.dll"
+    "!CURRENT_BROTLI_STAGE!\include\brotli\decode.h"
+    "!CURRENT_BROTLI_STAGE!\include\brotli\encode.h"
+    "!BROTLI_MANIFEST!"
+) do (
+    if not exist "%%~fF" (
+        echo ERROR: Matching !BROTLI_CONFIG_TITLE! Brotli stage is incomplete: %%~fF
+        echo Run: third_party\brotli\build.cmd !BROTLI_CONFIG! clean
+        exit /b 1
+    )
+)
+
+for %%L in (brotlicommon brotlidec brotlienc) do (
+    dumpbin /headers "!CURRENT_BROTLI_STAGE!\bin\%%L.dll" | findstr /i /c:"8664 machine (x64)" >nul
+    if errorlevel 1 (
+        echo ERROR: Brotli !BROTLI_CONFIG_TITLE! %%L.dll is not x64.
+        exit /b 1
+    )
+)
+
+for %%M in (
+    "Brotli tag: !EXPECTED_BROTLI_TAG!"
+    "Brotli commit: !EXPECTED_BROTLI_COMMIT!"
+    "Configuration: !BROTLI_CONFIG_TITLE!"
+    "Architecture: x64"
+    "Visual Studio: !VS_EDITION! 2022"
+    "MSVC tools: !VCToolsVersion!"
+    "Windows SDK: !REQUIRED_WINDOWS_SDK!"
+    "CRT: !BROTLI_EXPECTED_CRT!"
+    "Library type: shared"
+    "Project shared smoke test: passed"
+    "Encoder runtime version: 1.2.0"
+    "Decoder runtime version: 1.2.0"
+) do (
+    findstr /x /l /c:"%%~M" "!BROTLI_MANIFEST!" >nul
+    if errorlevel 1 (
+        echo ERROR: Brotli manifest is missing the required value: %%~M
+        echo Rebuild the matching Brotli stage with: third_party\brotli\build.cmd !BROTLI_CONFIG! clean
+        exit /b 1
+    )
+)
+
+echo [OpenSSL] Matching Brotli stage validated: !CURRENT_BROTLI_STAGE!
+exit /b 0
+
+:verify_brotli_configuration
+if not exist "configdata.pm" (
+    echo ERROR: OpenSSL configdata.pm is missing after configuration.
+    exit /b 1
+)
+
+perl configdata.pm --options | findstr /x /c:"    brotli" >nul
+if errorlevel 1 (
+    echo ERROR: The existing OpenSSL configuration does not enable Brotli.
+    echo Rerun this configuration with clean to regenerate the pinned Configure options.
+    exit /b 1
+)
+
+perl configdata.pm --options | findstr /x /c:"    brotli-dynamic" >nul
+if errorlevel 1 (
+    echo ERROR: The existing OpenSSL configuration does not enable dynamic Brotli loading.
+    echo Rerun this configuration with clean to regenerate the pinned Configure options.
+    exit /b 1
+)
+
+perl configdata.pm --command-line | findstr /i /l /c:"--with-brotli-include=!BROTLI_INCLUDE_DIR!" >nul
+if errorlevel 1 (
+    echo ERROR: The existing OpenSSL configuration does not use the matching Brotli include stage.
+    echo Expected: --with-brotli-include=!BROTLI_INCLUDE_DIR!
+    echo Rerun this configuration with clean to regenerate the pinned Configure options.
+    exit /b 1
+)
+
+echo [OpenSSL] Dynamic Brotli configuration is enabled.
 exit /b 0
 
 :verify_stage
@@ -347,12 +492,17 @@ for %%F in (
     "!VERIFY_STAGE!\lib\libssl.lib"
     "!VERIFY_STAGE!\lib\cmake\OpenSSL\OpenSSLConfig.cmake"
     "!VERIFY_STAGE!\lib\ossl-modules\legacy.dll"
+    "!VERIFY_STAGE!\bin\brotlicommon.dll"
+    "!VERIFY_STAGE!\bin\brotlidec.dll"
+    "!VERIFY_STAGE!\bin\brotlienc.dll"
 ) do (
     if not exist "%%~fF" (
         echo ERROR: Expected staged artifact is missing: %%~fF
         exit /b 1
     )
 )
+
+set "PATH=!VERIFY_STAGE!\bin;!TOOLCHAIN_PATH!"
 
 "!VERIFY_STAGE!\bin\openssl.exe" version -a
 if errorlevel 1 (
@@ -368,6 +518,36 @@ if errorlevel 1 (
 if errorlevel 1 (
     echo ERROR: The staged OpenSSL legacy provider could not be loaded.
     exit /b 1
+)
+
+for %%L in (brotlicommon brotlidec brotlienc) do (
+    fc.exe /b "!CURRENT_BROTLI_STAGE!\bin\%%L.dll" "!VERIFY_STAGE!\bin\%%L.dll" >nul
+    if errorlevel 1 (
+        echo ERROR: Staged %%L.dll does not match the validated !VERIFY_CONFIG! Brotli stage.
+        exit /b 1
+    )
+)
+
+dumpbin /dependents "!VERIFY_STAGE!\bin\libcrypto-3-x64.dll" | findstr /i /c:"brotli" >nul
+if not errorlevel 1 (
+    echo ERROR: Dynamic Brotli mode is expected, but libcrypto has a direct Brotli DLL dependency.
+    exit /b 1
+)
+
+for %%E in (COMP_brotli COMP_brotli_oneshot BIO_f_brotli) do (
+    dumpbin /exports "!VERIFY_STAGE!\bin\libcrypto-3-x64.dll" | findstr /c:" %%E" >nul
+    if errorlevel 1 (
+        echo ERROR: Staged libcrypto does not export %%E.
+        exit /b 1
+    )
+)
+
+for %%L in (brotlicommon brotlidec brotlienc) do (
+    dumpbin /headers "!VERIFY_STAGE!\bin\%%L.dll" | findstr /i /c:"8664 machine (x64)" >nul
+    if errorlevel 1 (
+        echo ERROR: Staged %%L.dll is not x64.
+        exit /b 1
+    )
 )
 
 if /i "!VERIFY_CONFIG!"=="release" (
@@ -407,7 +587,12 @@ set "MANIFEST_PATH=!MANIFEST_STAGE!\build-manifest.txt"
 >>"!MANIFEST_PATH!" echo OpenSSL commit: !OPENSSL_COMMIT!
 >>"!MANIFEST_PATH!" echo Configuration: !MANIFEST_CONFIG!
 >>"!MANIFEST_PATH!" echo Configure target: VC-WIN64A
->>"!MANIFEST_PATH!" echo Configure options: shared !CONFIGURE_MODE! no-demos --libdir=lib
+>>"!MANIFEST_PATH!" echo Configure options: shared !CONFIGURE_MODE! enable-brotli-dynamic no-demos --libdir=lib
+>>"!MANIFEST_PATH!" echo Brotli tag: !EXPECTED_BROTLI_TAG!
+>>"!MANIFEST_PATH!" echo Brotli commit: !EXPECTED_BROTLI_COMMIT!
+>>"!MANIFEST_PATH!" echo Brotli stage: !CURRENT_BROTLI_STAGE!
+>>"!MANIFEST_PATH!" echo Brotli linkage: dynamic runtime loading
+>>"!MANIFEST_PATH!" echo Brotli integration tests: !BROTLI_INTEGRATION_TESTS!
 >>"!MANIFEST_PATH!" echo Test mode: !TEST_MODE!
 >>"!MANIFEST_PATH!" echo Visual Studio: !VS_EDITION! 2022
 >>"!MANIFEST_PATH!" echo Visual Studio root: !VS_ROOT!
@@ -422,6 +607,9 @@ set "MANIFEST_PATH=!MANIFEST_STAGE!\build-manifest.txt"
 >>"!MANIFEST_PATH!" echo.
 >>"!MANIFEST_PATH!" certutil -hashfile "!MANIFEST_STAGE!\bin\libcrypto-3-x64.dll" SHA256
 >>"!MANIFEST_PATH!" certutil -hashfile "!MANIFEST_STAGE!\bin\libssl-3-x64.dll" SHA256
+>>"!MANIFEST_PATH!" certutil -hashfile "!MANIFEST_STAGE!\bin\brotlicommon.dll" SHA256
+>>"!MANIFEST_PATH!" certutil -hashfile "!MANIFEST_STAGE!\bin\brotlidec.dll" SHA256
+>>"!MANIFEST_PATH!" certutil -hashfile "!MANIFEST_STAGE!\bin\brotlienc.dll" SHA256
 
 if errorlevel 1 (
     echo ERROR: Failed to write build manifest: !MANIFEST_PATH!
@@ -522,6 +710,9 @@ echo.
 echo Stage directories:
 echo   build\openssl\x64-debug\stage
 echo   build\openssl\x64-release\stage
+echo.
+echo A verified configuration-matching Brotli stage is required. Dynamic Brotli support
+echo is built into OpenSSL, and all three Brotli runtime DLLs are copied into its stage.
 exit /b 0
 
 :show_help_error
