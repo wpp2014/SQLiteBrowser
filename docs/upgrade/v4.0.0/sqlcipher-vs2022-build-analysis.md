@@ -1,8 +1,8 @@
 # SQLCipher 4.18.0 使用 Visual Studio 2022 构建分析
 
-> 文档性质：构建分析与独立 CMake 包装器实施说明
+> 文档性质：构建分析与 CMake/MSBuild 包装器实施说明
 >
-> 分析日期：2026-08-23
+> 最后更新：2026-08-26
 >
 > 源码位置：`third_party/sqlcipher/src`
 >
@@ -18,11 +18,11 @@
 
 本文以 [`third_party/sqlcipher/src/README.md`](../../../third_party/sqlcipher/src/README.md) 为入口，并核对了 `Makefile.msc`、`doc/compile-for-windows.md`、OpenSSL provider 源码、当前 Windows CI 和 `FindSQLCipher.cmake`。日常构建脚本与 Codex/Claude Skill 的操作说明见 [sqlcipher-build-automation-guide.md](sqlcipher-build-automation-guide.md)。
 
-初次分析阶段没有执行 SQLCipher 的生成、编译、链接、测试或部署。本轮后续实施已新增并验证独立 CMake 包装器，但没有修改 SQLCipher 子模块源码、仓库根 CMake、CI 和安装器；验证范围见第 18.4 节。
+初次分析阶段没有执行 SQLCipher 的生成、编译、链接、测试或部署。后续已经完成两轮实现：第一轮由 CMake 间接驱动完整 NMake 产品构建；本轮改为 NMake 只生成上游源码、CMake/MSBuild 直接编译产品。SQLCipher 子模块、仓库根 CMake、CI 和安装器仍未修改；最终验证范围见第 18.4 节。
 
 ## 1. 结论摘要
 
-SQLCipher 4.18.0 在 Windows 上应继续使用其原生 MSVC/NMake 构建系统，而不是直接作为 CMake 子目录加入：
+SQLCipher 4.18.0 不能像普通、已带 CMake 的依赖那样直接 `add_subdirectory(src)`，但产品编译可以由项目 CMake target 接管。最终职责划分为：
 
 ```text
 OpenSSL 3.5.7 Debug/Release stage
@@ -31,7 +31,10 @@ OpenSSL 3.5.7 Debug/Release stage
 VS2022 x64 + SDK 10.0.22621.0
               |
               v
-SQLCipher Makefile.msc + nmake
+Makefile.msc + NMake（只生成 amalgamation/header/shell）
+              |
+              v
+CMake/MSBuild（编译、链接、CTest、install）
               |
               v
 sqlcipher.dll + sqlcipher.lib + headers
@@ -48,14 +51,15 @@ SQLiteBrowser CMake imported target
 - 只支持 Windows x64；
 - 使用 VS2022 默认安装目录中的 Enterprise、Professional 或 Community；
 - 通过 `VsDevCmd.bat` 固定 x64 host、x64 target 和 SDK `10.0.22621.0`；
-- 使用 `Makefile.msc` 和 `nmake`；
+- 使用 `Makefile.msc` 和 NMake 生成 `sqlite3.c`、公开头文件与 `shell.c`；
+- 使用 CMake/MSBuild 编译和链接 `sqlcipher.dll`、`sqlcipher.lib` 与 `sqlcipher.exe`；
 - 使用 amalgamation 构建；
 - 生成 `sqlcipher.dll` 和 `sqlcipher.lib`，保持与当前项目 finder、CI 和安装器命名一致；
 - 显式设置 SQLCipher 必需宏；
 - 只链接相同配置的 OpenSSL 3.5.7 `libcrypto.lib`；
 - 设置 `USE_CRT_DLL=1`，使 Release 使用 `/MD`、Debug 使用 `/MDd`；
 - Debug 和 Release 使用独立 work/stage；
-- 第一阶段先闭环 Release；
+- Debug 和 Release 均使用配置专用 CMake work，并已完成闭环；
 - 产品构建与带 `SQLCIPHER_TEST` 的测试构建分离；
 - 不在 SQLCipher 源码目录生成任何文件。
 
@@ -259,13 +263,13 @@ SQLiteBrowser/
             |- lib/
 ```
 
-`Makefile.msc` 的 `TOP` 默认是当前目录，但 NMake 命令行可以覆盖它。因此推荐从 work 目录调用源码树中的 Makefile，并把 `TOP` 指向子模块根目录。
+`Makefile.msc` 的 `TOP` 默认是当前目录，但 NMake 命令行可以覆盖它。当前 wrapper 从配置专用 CMake work 的 `generated/` 目录调用源码树中的 Makefile，并把 `TOP` 指向子模块根目录。NMake 只生成源码，不再生成 SQLCipher 产品二进制。
 
 在实现自动化前必须实际验证一次这种源码外构建。上游 Makefile 中存在未统一引用引号的路径表达式，第一版脚本建议检测并拒绝带空格的仓库路径，直到路径带空格场景完成验证。当前路径 `F:\open-source\SQLiteBrowser` 不包含空格。
 
-## 8. Release x64 待验证命令
+## 8. 历史 Release x64 NMake 基线
 
-以下命令是推荐基线，尚未执行：
+以下命令记录了第一轮完整 NMake 产品构建的参数来源，已经不再作为当前入口执行。保留它用于审查功能宏、CRT 和 OpenSSL 链接语义；当前等价实现见第 18 节。
 
 ```cmd
 set "PROJECT_ROOT=F:\open-source\SQLiteBrowser"
@@ -311,21 +315,22 @@ popd
 - `SQLITE_ENABLE_JSON1` 对当前 SQLite baseline 可能已是兼容性空操作，第一阶段可以保留以对齐现有 CI 命令；
 - `SQLITE_ENABLE_MATH_FUNCTIONS` 应补入 SQLCipher 构建，使 SQLCipher-enabled 应用与普通 SQLite 构建功能一致。
 
-在实现脚本时，应把很长的宏列表集中到脚本变量或 NMake 包装文件中，并输出最终展开值；不要在多个 CI、开发脚本和文档中分别维护不同副本。
+当前完整宏列表集中在 `third_party/sqlcipher/CMakeLists.txt`，同一列表同时传给上游源码生成和 CMake 产品 target，并写入 manifest；脚本和文档不再维护第二份可执行参数。
 
 ## 9. Debug x64 差异
 
-Debug 必须使用完全独立的目录和 OpenSSL Debug stage：
+Debug 必须使用完全独立的 CMake work、generated 目录、stage 和 OpenSSL Debug stage：
 
 ```text
 SQLCIPHER_WORK=build/sqlcipher/x64-debug/work
 SQLCIPHER_STAGE=build/sqlcipher/x64-debug/stage
 OPENSSL_STAGE=build/openssl/x64-debug/stage
-DEBUG=3
-USE_CRT_DLL=1
+SQLCIPHER_CONFIGURATION=Debug
+CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDebugDLL
+`Makefile.msc` source generation: DEBUG=3, USE_CRT_DLL=1
 ```
 
-`DEBUG=3` 会关闭优化、生成 PDB、启用断言和 SQLite 调试诊断，并通过 `USE_CRT_DLL=1` 使用 `/MDd`。
+`DEBUG=3` 只用于生成上游 Debug 语义的 amalgamation；CMake Debug target 负责 `/MDd`、断言、诊断、编译与 linker PDB。
 
 如果只需要接近 Release 逻辑但带符号的诊断构建，可以在后续脚本设计时评估 `DEBUG=2`；第一版应固定单一 Debug 语义，不能让不同开发人员自行选择导致产物不可比较。
 
@@ -333,13 +338,15 @@ Debug DLL 依赖 `VCRUNTIME140D.dll` 和 Debug UCRT，只能在安装相应开�
 
 ## 10. Stage 规范
 
-NMake 成功后，项目脚本应显式复制到配置专用 stage，而不是把 work 目录直接交给主工程：
+CMake/MSBuild 编译和 CTest 成功后，项目脚本通过 `cmake --install` 生成配置专用 stage，而不是把 work 目录直接交给主工程：
 
 ```text
 stage/
 |- bin/
 |  |- sqlcipher.dll
 |  |- sqlcipher.exe                 # 开发和验证工具，可不进入最终产品
+|  |- sqlcipher.pdb                 # DLL linker PDB
+|  |- sqlcipher-cli.pdb             # CLI linker PDB
 |- include/
 |  |- sqlcipher/
 |     |- sqlite3.h
@@ -350,9 +357,9 @@ stage/
 |- build-manifest.txt
 ```
 
-PDB 应作为开发或符号归档产物保存，但不应默认进入最终用户安装包。
+stage 只保留 `bin/sqlcipher.pdb` 与 `bin/sqlcipher-cli.pdb` 两个 linker PDB，并与对应运行时产物放在同一目录。NMake 生成工具和 compiler PDB 留在 work，不得进入 stage；最终用户安装包是否携带符号由后续打包策略决定。
 
-`libcrypto-3-x64.dll` 的权威来源仍是 OpenSSL stage。SQLCipher stage 可以在运行验证目录中引用或复制它，但不能产生第二套不同来源的 OpenSSL DLL。
+`libcrypto-3-x64.dll` 以及 OpenSSL 动态加载的三个 Brotli DLL，其权威来源仍是匹配配置的 OpenSSL stage。SQLCipher-only stage 明确禁止复制这些 DLL；运行验证通过进程 PATH 引用 OpenSSL stage。
 
 manifest 至少记录：
 
@@ -512,17 +519,17 @@ SQLCipher::SQLCipher
 | Finder 继续使用单配置路径 | Debug/Release 链错库 | 改成 per-config imported target |
 | 只验证 DLL 存在 | 可能加载错误 OpenSSL/CRT | 使用 dumpbin、版本 PRAGMA 和干净环境测试 |
 
-## 15. 推荐实施顺序
+## 15. 实施状态与后续顺序
 
-### 阶段 A：Release 手工闭环
+### 阶段 A：独立依赖自动化闭环（已完成）
 
-1. 让 OpenSSL Release 脚本完整生成 manifest；
-2. 初始化 VS2022 x64 + SDK `10.0.22621.0`；
-3. 验证 SQLCipher tag、commit 和源码干净；
-4. 从空的 Release work 运行 NMake；
-5. 生成 `sqlcipher.dll`、`sqlcipher.lib`、CLI 和 headers；
-6. stage 产物并生成 manifest；
-7. 完成 PRAGMA、数据库、依赖和 CRT smoke test。
+1. OpenSSL Debug/Release stage 和 manifest 作为强制输入；
+2. 脚本初始化 VS2022 x64 + SDK `10.0.22621.0`；
+3. 验证 SQLCipher tag、commit、SQLite baseline 和源码干净；
+4. NMake 在配置专用 `work/generated` 只生成源码；
+5. CMake/MSBuild 生成 DLL、import library、CLI、headers 和 linker PDB；
+6. `cmake --install` 生成 SQLCipher-only stage 与 manifest；
+7. Debug/Release 均已通过 CTest provider smoke、PRAGMA、依赖、导出、CRT、编译选项和运行时检查。
 
 ### 阶段 B：正式专项测试
 
@@ -541,30 +548,30 @@ SQLCipher::SQLCipher
 4. 运行项目 CTest 和数据库功能测试；
 5. 更新部署和安装器路径。
 
-### 阶段 D：Debug 与自动化
+### 阶段 D：Debug 与自动化（依赖级已完成，CI 待接入）
 
-1. 使用 OpenSSL Debug stage 构建 SQLCipher Debug；
-2. 验证 `/MDd` 和 Debug CRT；
-3. 把固定命令封装到 `third_party/sqlcipher` 父目录脚本；
-4. 创建对应项目 Skill；
-5. 将同一入口用于开发机和 CI。
+1. 已使用 OpenSSL Debug stage 构建 SQLCipher Debug；
+2. 已验证 `/MDd`、Debug CRT、PDB 和依赖；
+3. 固定入口为 `third_party/sqlcipher/build.cmd`；
+4. Codex/Claude 兼容项目 Skill 已同步；
+5. 待将同一入口接入 CI。
 
 ## 16. 最终建议
 
-当前最稳妥的第一步不是修改主工程 CMake，而是先完成一次独立的 SQLCipher 4.18.0 Release x64 原生 NMake 闭环。
+当前独立依赖闭环已经完成，不再建议回退到完整 NMake 产品构建。后续应以本轮验证通过的“上游生成 + CMake/MSBuild 产品构建”作为唯一自动化基线。
 
-该闭环必须证明：
+当前闭环已经证明：
 
 - 使用 VS2022、v143、SDK `10.0.22621.0`；
-- 使用 `/MD`；
-- 只链接项目 OpenSSL 3.5.7 Release；
+- Release 使用 `/MD`，Debug 使用 `/MDd`；
+- 只链接匹配配置、manifest 验证通过的项目 OpenSSL 3.5.7；
 - 生成项目所需名称和 stage 布局；
 - 保持 SQLCipher 子模块干净；
-- 能处理明文 SQLite 和 SQLCipher 4 数据库；
-- 能打开现有用户数据库；
-- 后续补齐 Tcl 后通过 SQLCipher 专项测试。
+- CTest shared/provider smoke 与加密 provider probe 通过。
 
-在此闭环通过后，再实现 SQLCipher 构建脚本、Skill、CMake imported target 和安装器部署，可以显著降低同时排查 NMake、OpenSSL、Qt、CMake 和数据库兼容问题的复杂度。
+仍需由后续发布门禁证明：明文 SQLite、错误密钥、rekey、现有用户数据库兼容性，以及补齐 Tcl 后的 SQLCipher 专项测试。
+
+构建脚本、Skill 和 CMake target 已实现；下一阶段应让主工程和安装器消费受验证 stage，并补齐真实数据库兼容性及 Tcl 专项测试，避免在同一变更中再次重写依赖构建。
 
 ## 17. 本地分析依据
 
@@ -579,103 +586,75 @@ SQLCipher::SQLCipher
 - [`development-environment-upgrade-plan.md`](development-environment-upgrade-plan.md)
 - [`openssl-build-automation-guide.md`](openssl-build-automation-guide.md)
 
-## 18. 已实现的独立 CMake 构建入口
+## 18. 已实现的 CMake/MSBuild 产品构建入口
 
-本轮已新增以下仓库文件：
+当前仓库实现由两个文件构成：
 
-- [`third_party/sqlcipher/CMakeLists.txt`](../../../third_party/sqlcipher/CMakeLists.txt)：配置入口、工具链约束、构建目标和 imported target；
-- [`third_party/sqlcipher/cmake/BuildSQLCipher.cmake`](../../../third_party/sqlcipher/cmake/BuildSQLCipher.cmake)：在构建阶段生成并执行受控的 NMake 命令、校验产物并写入 stage。
+- [`third_party/sqlcipher/CMakeLists.txt`](../../../third_party/sqlcipher/CMakeLists.txt)：上游源码生成规则、原生 CMake shared library/CLI target、CTest、install 和 PDB 策略；
+- [`third_party/sqlcipher/build.cmd`](../../../third_party/sqlcipher/build.cmd)：版本与工具链预检、配置编排、OpenSSL/Brotli 契约、运行时审计和 manifest。
 
-这不是把 SQLCipher 源文件改写为原生 CMake target。CMake 仍然调用上游 `Makefile.msc`，因此保留 SQLCipher/SQLite 官方 Windows 构建逻辑，同时不修改 `third_party/sqlcipher/src`。
+旧的 `third_party/sqlcipher/cmake/BuildSQLCipher.cmake` 已删除。当前不再生成临时批处理，也不再由 CMake helper 启动完整 NMake 产品构建。
 
-### 18.1 配置与构建
+### 18.1 构建职责
 
-日常构建建议从仓库根目录使用统一脚本：
+```text
+Makefile.msc / NMake
+  -> Jim Tcl、Lemon、FTS5、sqlite3.c、headers、shell.c
+
+CMake / MSBuild
+  -> sqlcipher.dll + sqlcipher.lib + sqlcipher.exe
+  -> OpenSSL::Crypto import target
+  -> CTest shared/provider smoke
+  -> cmake --install
+```
+
+NMake 的 `LDFLAGS` 覆盖只影响生成工具：Debug 使用 `/DEBUG`，Release 使用空值，避免上游默认 `/NODEFAULTLIB:msvcrt` 破坏 Release 生成工具链接。SQLCipher 产品链接选项完全由 CMake target 控制。
+
+### 18.2 配置与固定行为
+
+日常入口：
 
 ```cmd
 third_party\sqlcipher\build.cmd check
-third_party\sqlcipher\build.cmd release
 third_party\sqlcipher\build.cmd debug
+third_party\sqlcipher\build.cmd release
+third_party\sqlcipher\build.cmd all
 ```
 
-完整参数、`clean` 边界、OpenSSL 前置条件和 Skill 用法见 [sqlcipher-build-automation-guide.md](sqlcipher-build-automation-guide.md)。底层等价的手工 CMake 命令为：
+每个配置使用 `build/sqlcipher/x64-<config>/work`，CMake 将生成配置限制为单一 Debug 或 Release。固定行为包括：
 
-```cmd
-cmake -S third_party/sqlcipher -B build/sqlcipher-cmake ^
-  -G "Visual Studio 17 2022" ^
-  -A x64 ^
-  "-DCMAKE_SYSTEM_VERSION=10.0.22621.0"
+- VS2022 x64、MSVC v143、SDK `10.0.22621.0`；
+- SQLCipher `v4.18.0`、SQLite `3.53.4`、子模块干净；
+- Debug `/MDd`，Release `/MD`；
+- 相同配置的 OpenSSL 3.5.7 stage；
+- OpenSSL manifest 必须记录 Brotli 1.2.0 与 `enable-brotli-dynamic`；
+- 一份 CMake 宏列表同时用于源码生成、产品编译和 manifest；
+- `SQLCipher::SQLCipher` 是当前 build tree 中 `sqlcipher` target 的 alias，不是预先存在文件的 imported target；
+- 只支持 Debug/Release，不再映射 RelWithDebInfo/MinSizeRel。
 
-cmake --build build/sqlcipher-cmake --config Release --target sqlcipher_stage
-cmake --build build/sqlcipher-cmake --config Debug --target sqlcipher_stage
-```
-
-`-DCMAKE_SYSTEM_VERSION=10.0.22621.0` 建议始终作为完整参数加引号。尤其在 PowerShell 中，不加引号可能把版本号拆成额外参数，导致 CMake 选择其他已安装 SDK。
-
-默认要求匹配的 OpenSSL stage 已存在：
-
-```text
-build/openssl/x64-debug/stage
-build/openssl/x64-release/stage
-```
-
-如需覆盖路径，可在配置阶段传入：
-
-```cmd
--DSQLCIPHER_OPENSSL_ROOT_DEBUG=<debug-stage>
--DSQLCIPHER_OPENSSL_ROOT_RELEASE=<release-stage>
--DSQLCIPHER_STAGE_ROOT=<sqlcipher-output-root>
-```
-
-### 18.2 固定行为
-
-当前入口固定执行以下约束和检查：
-
-- Windows x64、Visual Studio 2022 和 SDK `10.0.22621.0`；
-- VS2022 Enterprise、Professional、Community 默认安装目录；
-- SQLCipher 必须位于 tag `v4.18.0` 对应 commit，且子模块工作区必须干净；
-- Debug 只链接 OpenSSL Debug stage，Release 只链接 OpenSSL Release stage；
-- `USE_CRT_DLL=1`，Debug 使用 `/MDd`，Release 使用 `/MD`；
-- `NO_TCL=1`，产品构建不依赖 Tcl；
-- `DYNAMIC_SHELL=1`，可选构建 `sqlcipher.exe` 并让它使用 `sqlcipher.dll`；
-- 为 DLL 显式导出 `sqlcipher_version`，使动态 shell 可以链接并在运行时调用该符号；
-- 显式覆盖 `Makefile.msc` 的 `LDFLAGS=/NODEFAULTLIB:msvcrt`：Release 不附加该选项，Debug 只附加 `/DEBUG`，从而与 `/MD`、`/MDd` 一致；
-- 每次先清理独立 work 目录中的 NMake 产物，避免复用旧编译选项；
-- 生成标准 CRLF 批处理并切换到 UTF-8 代码页，再由 Windows PowerShell 启动批处理，以规避 CMake 3.30 在当前环境中直接执行 `cmd.exe /c` 时的命令语法错误和乱码；
-- 使用 `dumpbin` 检查 `libcrypto-3-x64.dll` 和 CRT 依赖；
-- 使用 CLI 先对内存数据库设置临时 key，再查询 `cipher_version`、`cipher_provider` 和 `cipher_provider_version`；
-- 为 DLL、import library 和 OpenSSL runtime 记录 SHA-256 与构建 manifest。
-
-`RelWithDebInfo` 和 `MinSizeRel` 当前映射到 Release。第一版仍拒绝源码、输出或 OpenSSL 路径中包含空格。
-
-### 18.3 输出布局
+### 18.3 输出与验证
 
 ```text
 build/sqlcipher/
 |- x64-debug/
-|  |- work/
-|  `- stage/{bin,include/sqlcipher,lib,pdb}/
+|  |- work/{generated,Debug,...}/
+|  `- stage/{bin,include/sqlcipher,lib,share/licenses/sqlcipher}/
 `- x64-release/
-   |- work/
-   `- stage/{bin,include/sqlcipher,lib,pdb}/
+   |- work/{generated,Release,...}/
+   `- stage/{bin,include/sqlcipher,lib,share/licenses/sqlcipher}/
 ```
 
-CMake 同时导出 `SQLCipher::SQLCipher` imported target，供后续主工程集成。当前没有修改仓库根 `CMakeLists.txt`、`FindSQLCipher.cmake`、CI 或安装器，因此主工程还不会自动触发这个入口。
+2026-08-26 已使用 VS2022 Enterprise、MSVC `14.44.35207`、CMake `3.30.3` 和 SDK `10.0.22621.0` 完整验证 Debug 与 Release：
 
-### 18.4 验证状态与边界
+- 上游源码生成成功，子模块保持干净；
+- CMake/MSBuild 直接生成 `sqlcipher.dll`、`sqlcipher.lib` 和动态链接该 DLL 的 `sqlcipher.exe`；
+- 两个配置的 CTest `sqlcipher.provider.smoke` 均通过；
+- provider 为 SQLCipher `4.18.0 community`、`openssl`、OpenSSL `3.5.7`；
+- 受控 compile-options 清单、x64、导出、Crypto 依赖及 Debug/Release CRT 审计通过；
+- stage 的 `bin` 只包含 `sqlcipher.pdb` 与 `sqlcipher-cli.pdb` 两个 linker PDB，不包含生成工具/compiler PDB；
+- SQLCipher-only stage 未复制 OpenSSL 或 Brotli DLL；
+- manifest 包含版本、工具链、完整宏、OpenSSL manifest hash 和产品 SHA-256。
 
-本轮已经完成：
+### 18.4 尚未覆盖的范围
 
-- 使用 VS2022 Enterprise 和 x64 generator 配置、生成成功；
-- 生成的 `.vcxproj` 明确包含 `<WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>`；
-- Release `sqlcipher_stage` 已通过 MSBuild/NMake 完整编译、链接、校验并部署；
-- 已生成 `sqlcipher.dll`、`sqlcipher.lib`、`sqlcipher.exe`、公开头文件、PDB 和 `build-manifest.txt`；
-- provider 探测结果为 SQLCipher `4.18.0 community`、`openssl`、`OpenSSL 3.5.7 9 Jun 2026`；
-- `dumpbin` 确认 DLL 依赖 `libcrypto-3-x64.dll`、`VCRUNTIME140.dll` 和 Release UCRT，不依赖 Debug CRT；
-- `dumpbin /exports` 确认 DLL 导出 `sqlcipher_version`；
-- 生成的批处理为正常 CRLF，没有导致 CMD 解析失败的 `CRCRLF`。
-- `third_party\sqlcipher\build.cmd check` 已通过工具链、子模块和两个 OpenSSL stage 预检；
-- `third_party\sqlcipher\build.cmd all` 已通过 Debug 和 Release 的完整构建与 stage 验证；
-- Codex 规范 Skill 和 Claude Code 兼容入口已通过 Skill frontmatter/结构校验。
-
-本轮已通过统一脚本完整验证 Debug 和 Release。该入口不会运行 Tcl 测试或 `test/sqlcipher.test`；正式专项测试仍应按本文第 12、15 节使用独立测试构建完成。编译仍可见上游 C4267/C4701 警告，但没有构建错误。
+当前未修改仓库根 `CMakeLists.txt`、`FindSQLCipher.cmake`、CI、SQLiteBrowser 应用部署或 NSIS。CTest provider smoke 不等于官方 Tcl 专项测试；`test/sqlcipher.test`、真实用户数据库兼容性、rekey 和干净虚拟机安装验证仍是后续发布门禁。

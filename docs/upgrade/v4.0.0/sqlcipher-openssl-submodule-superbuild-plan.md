@@ -4,7 +4,7 @@
 
 本文分析在 SQLiteBrowser 的 `upgrade/v4.0.0` 分支中，将 SQLCipher 4.18.0 与 OpenSSL 3.5.7 作为 Git submodule 引入，并在 Windows、Visual Studio 2022、Windows SDK 10.0.22621.0 下统一构建的可行方案。
 
-本文给出设计和实施建议。OpenSSL 与 SQLCipher 已按本文路径加入 Git submodule；当前仍未增加 wrapper `CMakeLists.txt` 或修改主工程构建配置。
+本文最初用于设计子模块与统一构建。当前截至 2026-08-26，OpenSSL、SQLCipher、Brotli 等源码子模块和各自 wrapper 已落地，OpenSSL 与 SQLCipher 的 Debug/Release 独立构建已经验证；仓库根 CMake、SQLiteBrowser 主程序部署、CI 和安装器尚未接入这些 stage。本文同时记录当前实现和后续主工程级 superbuild 方向。
 
 ## 2. 结论摘要
 
@@ -13,28 +13,27 @@
 - Git submodule 只负责把依赖源码固定到确定的提交。
 - CMake superbuild 负责按顺序调用各依赖自己的构建系统，并把输出交给 SQLiteBrowser。
 
-推荐采用以下依赖关系：
+当前已实现的依赖关系为：
 
 ```text
-OpenSSL 3.5.7 源码子模块
+Brotli 1.2.0 stage
           |
           v
-OpenSSL ExternalProject（VS2022 x64 / SDK 10.0.22621.0）
+OpenSSL 3.5.7 stage（enable-brotli-dynamic）
           |
           v
-SQLCipher 4.18.0 源码子模块
+SQLCipher 4.18.0
+  Makefile.msc/NMake：只生成 amalgamation、headers、shell.c
+  CMake/MSBuild：直接编译 sqlcipher.dll 与 sqlcipher.exe
           |
           v
-SQLCipher ExternalProject（链接上一步生成的 libcrypto）
+SQLCipher-only stage
           |
           v
-统一 stage 目录（include / lib / bin）
-          |
-          v
-SQLiteBrowser 主程序构建与安装包
+未来：SQLiteBrowser 主工程编排与最终应用 stage/安装包
 ```
 
-不建议把 OpenSSL 或 SQLCipher 直接通过 `add_subdirectory()` 加入主工程。OpenSSL 使用 Perl `Configure` 和 `nmake`，SQLCipher 在 Windows 上使用 `Makefile.msc` 和 `nmake`；它们并不是可直接嵌入当前工程的原生 CMake 子目录。
+不建议把 OpenSSL 直接通过 `add_subdirectory()` 加入主工程；它仍使用 Perl `Configure` 和 `nmake`。SQLCipher 当前已有父目录 CMake wrapper，但它不是把上游源码目录直接嵌入：NMake 只负责生成上游源码，产品 DLL、CLI、安装和 CTest 由 CMake/MSBuild 管理。
 
 开发环境、CI 和正式构建的 OpenSSL 目标版本统一为 **3.5.7**：SQLCipher 链接该版本的 Crypto 库，Qt 6.11.1 的 OpenSSL TLS backend 运行时也使用同一构建生成的 SSL/Crypto DLL。Qt 6.11.1 官方 Windows 构建使用的是 3.5.4，但 OpenSSL 3.5.7 是同一 LTS 系列当前已发布的最新 patch，且 OpenSSL 官方保证同一主版本 API/ABI 兼容。用户现有 OpenSSL 4.0.1 及其 SQLCipher 二进制不得进入任何开发、测试、CI 或发布构建。
 
@@ -42,7 +41,7 @@ SQLiteBrowser 主程序构建与安装包
 
 ### 3.1 当前第三方依赖组织方式
 
-当前 `libs/` 中的 json、qcustomplot、qhexedit、qscintilla 等依赖是直接纳入仓库的源码，不是 Git submodule。仓库现已增加 `.gitmodules`，只登记 OpenSSL 与 SQLCipher 两个顶层 submodule。
+当前 `libs/` 中的 json、qcustomplot、qhexedit、qscintilla 等依赖是直接纳入仓库的源码，不是 Git submodule。仓库的 `.gitmodules` 现已登记 OpenSSL、SQLCipher、zlib、zstd 和 Brotli 五个源码子模块；本文重点只讨论 OpenSSL/SQLCipher 以及 OpenSSL 动态依赖的 Brotli。
 
 OpenSSL 和 SQLCipher 与这些依赖不同：二者都有独立构建过程、独立产物和独立版本生命周期。因此建议放到新的 `third_party/` 目录，而不是继续混入 `libs/`：
 
@@ -68,32 +67,22 @@ third_party/
 
 当前 Windows 安装逻辑还会查找并复制 SQLCipher、OpenSSL 的运行时 DLL。这种设计适合消费已安装的二进制依赖，但不能自行从源码生成依赖。因此引入源码子模块后，仍然需要一层 superbuild 先生成符合现有查找约定的目录结构。
 
-### 3.3 当前 Git 子模块工具风险
+### 3.3 Git 子模块状态
 
-在当前环境中执行 `git submodule status` 时出现了以下错误：
+此前记录的 Git 2.33/MSYS 脚本故障来自另一套工具环境，已经不再是当前阻塞项。开发者在 CMD 中实际使用的是 `git version 2.45.1.windows.1`，标准命令可以初始化仓库中的递归子模块：
 
-```text
-E:/DevTools/Git/mingw64/libexec/git-core\git-submodule: line 22:
-.: git-sh-setup: file not found
+```cmd
+git submodule update --init --recursive
 ```
 
-当前 Git 为 `2.33.0.windows.2`，位于自定义的 `E:\DevTools\Git`。相关脚本文件虽然存在，但子模块脚本运行时仍无法加载 `git-sh-setup`。这通常与 Git for Windows 安装不完整、版本过旧，或 Git/MSYS 的 PATH 混用有关；仅凭现有信息不能断定唯一原因。
-
-当前仓库已经通过 Git 自带 Bash 显式补充 exec path 的方式完成 submodule 添加和递归初始化。父仓库记录为：
+本文范围内父仓库固定的关键 gitlink 为：
 
 ```text
 third_party/openssl/src   8cf17aaeb4599f8af87fefd810b5b5fee90fe69e  openssl-3.5.7
 third_party/sqlcipher/src 63697beb0fafcb61faa7a3e6fd267036548ab11b  v4.18.0
 ```
 
-仓库配置本身可供标准 Git 执行 `git submodule update --init --recursive`。但当前机器若直接从 PowerShell/CMD 调用 Git 2.33.0，仍会触发上述安装级脚本错误；该问题不能通过 `.gitmodules` 修复。继续开发前应：
-
-1. 升级或重新安装完整的 Git for Windows；
-2. 确认 `where git` 只命中预期安装；
-3. 避免把不同 Git/MSYS/Unix 工具目录混合到 PATH；
-4. 验证直接执行 `git submodule status`、`git submodule update --init --recursive` 均可工作，不再依赖 Bash PATH workaround。
-
-这是实施子模块方案的前置阻塞项，但不影响本文的架构结论。
+新开发机仍应执行 `where git`、`git --version` 和上述递归初始化命令，避免不同 Git/MSYS 工具目录混入 PATH；但不再需要历史 Bash PATH workaround。
 
 ### 3.4 Qt 6.11.1 的 OpenSSL 版本结论
 
@@ -127,45 +116,33 @@ Qt 对 OpenSSL 的要求需要分成“接口兼容范围”和“本次官方�
 
 标签便于阅读，提交 ID 才是可复现构建的最终依据。
 
-## 5. 推荐目录结构
+## 5. 当前目录与产物结构
 
-建议的目标结构如下：
+当前依赖 wrapper 和配置隔离布局如下：
 
 ```text
 SQLiteBrowser/
   CMakeLists.txt
-  CMakePresets.json
-  cmake/
-    superbuild/
-      CMakeLists.txt
-      OpenSSLExternal.cmake
-      SQLCipherExternal.cmake
-      SQLiteBrowserExternal.cmake
   third_party/
+    brotli/
+      CMakeLists.txt
+      build.cmd
+      src/                    # submodule，保持只读/干净
     openssl/
-      CMakeLists.txt          # 后续新增：父工程构建 wrapper
+      build.cmd
       src/                    # submodule，保持只读/干净
     sqlcipher/
-      CMakeLists.txt          # 后续新增：父工程构建 wrapper
+      CMakeLists.txt          # CMake/MSBuild 产品构建 wrapper
+      build.cmd
       src/                    # submodule，保持只读/干净
   build/
-    superbuild/
-      openssl-build/
-      openssl-install/
-      sqlcipher-work/
-      sqlcipher-install/
-      stage/
-        Release/
-          include/
-            sqlcipher/
-          lib/
-          bin/
-        Debug/
-          include/
-            sqlcipher/
-          lib/
-          bin/
-      sqlitebrowser-build/
+    brotli/x64-<config>/stage/
+    openssl/x64-<config>/stage/
+    sqlcipher/
+      x64-<config>/
+        work/
+          generated/
+        stage/
 ```
 
 所有生成文件必须留在 `build/` 下，不能直接写入 `third_party/openssl/src` 或 `third_party/sqlcipher/src`。wrapper 文件放在各自父目录中，不修改上游源码子模块。这样可以保证：
@@ -175,21 +152,22 @@ SQLiteBrowser/
 - Debug、Release 可以拥有完全隔离的输出；
 - 子模块切换版本时不会残留旧版本生成文件。
 
-## 6. CMake superbuild 设计
+## 6. 当前分层构建与未来主工程 superbuild
 
-### 6.1 为什么采用独立 superbuild
+### 6.1 当前实现边界
 
-推荐在 `cmake/superbuild/` 中建立一个外层 CMake 工程，使用 CMake 3.30 的 `ExternalProject_Add()` 编排三个外部项目：
+当前每个依赖由自己的 `build.cmd` 驱动，并把经过验证的结果写入配置专用 stage：
 
-1. `openssl_external`；
-2. `sqlcipher_external`，依赖 `openssl_external`；
-3. `sqlitebrowser_external`，依赖 `sqlcipher_external`。
+1. Brotli wrapper 生成 Brotli stage；
+2. OpenSSL wrapper 消费匹配配置的 Brotli stage，生成 OpenSSL stage 和 manifest；
+3. SQLCipher wrapper 严格验证匹配配置的 OpenSSL manifest，再生成 SQLCipher-only stage；
+4. Debug 与 Release 的 work、CMake build 和 stage 完全隔离。
 
-外层 CMake 不直接编译 SQLiteBrowser 源码，而是管理依赖顺序、命令、安装前缀和产物。SQLiteBrowser 作为最后一个 ExternalProject 重新配置内层主工程，并从统一 stage 目录查找依赖。
+这已经解决单个依赖的可复现构建，但尚未提供仓库根的一条命令编排，也没有让 SQLiteBrowser 主工程消费这些 stage。
 
-该两层结构比在主工程内混合 imported target 和构建时依赖更清晰，也能保证在配置 SQLiteBrowser 前，SQLCipher 的头文件和库已经真实存在。
+### 6.2 未来 ExternalProject 编排
 
-### 6.2 ExternalProject 必须显式控制的内容
+后续可在 `cmake/superbuild/` 增加外层 CMake 工程，用 `ExternalProject_Add()` 依次调用现有入口，而不是重新实现它们：Brotli、OpenSSL、SQLCipher、SQLiteBrowser。外层只负责编排依赖顺序、配置和最终应用 stage；各依赖的版本、工具链、检查、测试与 manifest 仍以自身 `build.cmd` 为单一事实来源。
 
 `ExternalProject_Add()` 可以表达 `DEPENDS`、源码目录、构建目录、安装目录和 `BUILD_BYPRODUCTS`，但它不会自动把 Visual Studio generator 的所有设置传递给 Perl、`nmake` 或自定义 Makefile。
 
@@ -199,7 +177,7 @@ SQLiteBrowser/
 - 使用 MSVC v143；
 - Windows SDK 固定为 10.0.22621.0；
 - `cl.exe`、`link.exe`、`nmake.exe` 来自同一个 VS2022 环境；
-- OpenSSL 和 SQLCipher 使用一致的 x64 架构与 C/C++ 运行库；
+- Brotli、OpenSSL、SQLCipher 和主程序使用一致的 x64 架构与对应配置运行库；
 - 每个配置拥有独立的构建和安装目录；
 - 所有关键输出通过 `BUILD_BYPRODUCTS` 声明，以便 Ninja/MSBuild 正确判断依赖关系。
 
@@ -217,7 +195,7 @@ CMAKE_SYSTEM_VERSION: 10.0.22621.0
 QT_ROOT: E:/QT/6.11.1/msvc2022_64
 ```
 
-第一阶段只提供 Release build preset。Debug 在 OpenSSL、SQLCipher 和主程序的 Debug 运行库全部打通后再加入。
+OpenSSL 和 SQLCipher 的依赖级 Debug/Release 链路已经打通；根级 preset 应同时提供两种配置，但在主程序与安装包接入前不能宣称完成端到端构建。
 
 ## 7. OpenSSL 子项目构建
 
@@ -311,28 +289,23 @@ SQLCipher 当前所用算法可由 OpenSSL 3 默认 provider 提供，不应依�
 
 ### 8.1 构建顺序
 
-`sqlcipher_external` 必须声明依赖 `openssl_external`。SQLCipher 配置和链接参数只允许引用 superbuild 生成的 OpenSSL install/stage 路径，不能回退到 `C:\Program Files\OpenSSL-Win64`，否则构建结果会重新依赖本机状态。
+当前 `third_party/sqlcipher/build.cmd` 要求匹配配置的 OpenSSL stage 和 `build-manifest.txt` 已存在。manifest 必须证明 OpenSSL 3.5.7、固定提交、匹配配置、匹配 CRT、Brotli 1.2.0 和 `enable-brotli-dynamic`。SQLCipher 配置和链接参数只允许引用该 stage，不能回退到 `C:\Program Files\OpenSSL-Win64` 或 PATH。未来 `sqlcipher_external` 也必须声明对 `openssl_external` 的顺序依赖。
 
 ### 8.2 避免污染 SQLCipher 子模块
 
-SQLCipher 的 Windows `Makefile.msc` 主要按源码目录内构建方式工作。为保持子模块干净，建议在每个配置开始前：
+当前 wrapper 不复制整个源码树，也不在 submodule 内构建。CMake 在 `build/sqlcipher/x64-<config>/work` 下配置，并从该目录的 `generated/` 子目录调用上游 `Makefile.msc`。NMake 只生成 `sqlite3.c`、`sqlite3.h`、`sqlite3ext.h`、`sqlite3session.h` 和 `shell.c`；随后 CMake/MSBuild 从这些生成文件和只读源码树编译产品。
 
-1. 将 `third_party/sqlcipher/src` 复制到 `build/superbuild/sqlcipher-work/<config>`；
-2. 只在该工作副本中运行 `nmake`；
-3. 把最终文件安装/复制到 `sqlcipher-install/<config>`；
-4. 主程序只消费安装目录，不接触工作副本。
-
-不要在真实 submodule 目录中使用 `BUILD_IN_SOURCE`。复制源码会增加少量磁盘和时间开销，但能明显降低残留产物、错误清理和版本切换风险。
+这种方式避免完整源码复制和 NMake 产品链接，同时保持 submodule 干净。NMake 的 `LDFLAGS` 覆盖仅作用于 Jim Tcl、Lemon 等生成工具：Debug 使用 `/DEBUG`，Release 使用空值，以避免上游 `/NODEFAULTLIB:msvcrt` 破坏 Release 生成工具链接。
 
 ### 8.3 输出命名与特性参数
 
-建议保持当前 SQLiteBrowser Windows CI 已采用的命名：
+当前 CMake target 已固定以下产品命名：
 
 - `sqlcipher.dll`；
 - `sqlcipher.lib`；
 - `sqlcipher.exe`。
 
-同时以当前上游 CI 参数为功能基线，至少核对以下编译特性：
+同时以当前上游 CI 参数为功能基线，并由脚本审计以下核心编译特性：
 
 ```text
 SQLITE_TEMP_STORE=2
@@ -351,28 +324,35 @@ SQLITE_MAX_ATTACHED=125
 
 这一步很重要。用户现有 SQLCipher 4.18.0 自编译库虽然可识别为 SQLCipher，但其编译选项与 SQLiteBrowser 当前 CI 基线并不完全一致，例如 `MAX_ATTACHED` 和部分 SQLite 特性。把源码纳入 superbuild 后，应把功能集合写成受版本控制的明确参数，并增加运行时查询验证，而不是只验证 DLL 能否链接。
 
-实现时可沿用上游 CI 的 `Makefile.msc` 调用思路，例如启用 amalgamation、关闭 Tcl、指定输出名，并通过 include/link 参数引用本次构建的 OpenSSL。具体变量名必须以 SQLCipher `v4.18.0` 的 `Makefile.msc` 为准。
+完整受控定义记录在 stage 的 `build-manifest.txt` 和 `compile-options.txt` 中。产品目标链接匹配 OpenSSL stage 的 `libcrypto.lib`；SQLCipher 不直接链接 `libssl.lib`。
 
 ### 8.4 SQLCipher staging 结构
 
-SQLCipher 安装步骤应统一生成：
+`cmake --install` 当前生成配置专用 SQLCipher-only stage：
 
 ```text
-stage/<config>/
+build/sqlcipher/x64-<config>/stage/
+  build-manifest.txt
+  compile-options.txt
+  provider-probe.txt
   include/
     sqlcipher/
       sqlite3.h
       sqlite3ext.h
+      sqlite3session.h
   lib/
     sqlcipher.lib
   bin/
     sqlcipher.dll
     sqlcipher.exe
-    libcrypto-3-x64.dll
-    libssl-3-x64.dll
+    sqlcipher.pdb
+    sqlcipher-cli.pdb
+  share/licenses/sqlcipher/
+    LICENSE.md
+    SQLITE_LICENSE.md
 ```
 
-还应复制对应许可证文件。后续 SQLiteBrowser 配置、测试、`windeployqt` 后处理和 NSIS 打包都只读取 stage，不能分别从 SQLCipher 工作目录、OpenSSL 安装目录和系统 PATH 拼装文件。
+SQLCipher stage 故意不复制 OpenSSL 或 Brotli DLL，避免多个依赖 stage 出现重复且可能漂移的二进制。当前 CLI/CTest 运行时临时把匹配 OpenSSL `bin` 加入进程 DLL 搜索路径；未来最终应用 stage/安装包应从 SQLCipher、OpenSSL、Brotli 和 Qt 各自的权威 stage 集中收集一次。
 
 ## 9. SQLiteBrowser 主工程接入
 
@@ -387,7 +367,7 @@ SQLCipher::SQLCipher
   IMPORTED_LOCATION_<CONFIG>    -> stage/<config>/bin/sqlcipher.dll
 ```
 
-OpenSSL 的编译期依赖应通过 SQLCipher target 或明确的包配置表达；Qt TLS 的运行时 DLL 也必须从同一个 stage 部署，避免主程序或 Qt plugin 通过全局 PATH 偶然加载系统 OpenSSL。
+OpenSSL 的编译期依赖应通过 SQLCipher target 或明确的包配置表达；最终应用部署必须从同一配置的 OpenSSL stage 取得 SSL/Crypto 及其 Brotli 运行时，避免主程序或 Qt plugin 通过全局 PATH 偶然加载系统 OpenSSL。
 
 ### 9.2 内层主工程配置
 
@@ -416,12 +396,11 @@ OpenSSL 的编译期依赖应通过 SQLCipher target 或明确的包配置表达
 
 ### 10.2 SQLCipher
 
-- SQLCipher 自身测试通过；
+- 当前 CTest provider smoke 通过，并明确记录官方 Tcl SQLCipher 测试未运行；
 - `PRAGMA cipher_version;` 返回预期版本；
 - `PRAGMA compile_options;` 与受控特性清单一致；
-- 创建加密数据库、关闭、重新打开和读取成功；
-- 错误密钥无法读取；
-- 与现有 SQLCipher 4 数据库样本兼容；
+- CLI provider probe 能创建加密数据库并完成基本读写；
+- 发布门禁仍需补充错误密钥、rekey、官方 `test/sqlcipher.test` 和现有用户数据库样本兼容性；
 - `dumpbin /dependents` 只指向本次 staging 的预期运行时依赖。
 
 ### 10.3 SQLiteBrowser
@@ -441,9 +420,9 @@ CI checkout 必须初始化子模块，并验证其提交和依赖清单一致�
 
 1. checkout 父仓库及 recursive submodules；
 2. 输出 Git、VS、MSVC、SDK、CMake、Perl、NASM、Qt 版本；
-3. 配置 Release superbuild；
-4. 构建并测试 OpenSSL；
-5. 构建并测试 SQLCipher；
+3. 构建并测试匹配配置的 Brotli；
+4. 构建并测试匹配配置的 OpenSSL；
+5. 构建、运行 CTest 并验证 SQLCipher；
 6. 配置、构建并测试 SQLiteBrowser；
 7. 从统一 stage 生成安装包；
 8. 保存依赖清单、测试结果和最终 artifacts。
@@ -451,8 +430,8 @@ CI checkout 必须初始化子模块，并验证其提交和依赖清单一致�
 为增强供应链可审计性，构建产物应附带：
 
 - 父仓库提交；
-- 两个子模块的完整提交 ID；
-- OpenSSL/SQLCipher 构建参数；
+- 所有参与构建的子模块完整提交 ID；
+- Brotli/OpenSSL/SQLCipher 构建参数与各自 manifest；
 - MSVC、Windows SDK、CMake、Perl、NASM 和 Qt 版本；
 - `PRAGMA compile_options` 输出；
 - 最终 DLL 依赖列表；
@@ -462,13 +441,13 @@ CI checkout 必须初始化子模块，并验证其提交和依赖清单一致�
 
 | 风险 | 影响 | 控制措施 |
 | --- | --- | --- |
-| 当前 Git 子模块命令异常 | 无法可靠添加、初始化或更新 submodule | 先修复/升级 Git for Windows，并在测试仓库验证完整流程 |
-| 误认为 submodule 等于统一构建 | 依赖仍由不同编译器或本机路径生成 | 使用 ExternalProject superbuild，显式固定 VS、SDK、架构和路径 |
+| 新开发机 Git/MSYS 路径混用 | 无法可靠初始化 submodule | 记录 `where git`/`git --version` 并验证标准 recursive update；当前 Git 2.45.1 已解决历史故障 |
+| 误认为 submodule 等于统一构建 | 依赖仍由不同编译器或本机路径生成 | 使用现有 wrapper/manifest 固定 VS、SDK、架构、配置和路径；根级编排只调用这些入口 |
 | Perl/NASM 未安装或版本漂移 | OpenSSL 配置或汇编失败 | 纳入前置工具清单、配置期检查和 CI 版本记录 |
-| 在子模块目录内编译 | 污染源码、清理危险、切换版本残留 | OpenSSL out-of-source；SQLCipher复制到配置专用工作目录 |
+| 在子模块目录内编译 | 污染源码、清理危险、切换版本残留 | OpenSSL 使用配置专用 work；SQLCipher 只把生成文件写入配置专用 `work/generated` |
 | Debug/Release 运行库不一致 | 链接失败或运行时内存/CRT 问题 | 分离构建目录和安装前缀；Release 先行；逐项核对 `/MD`、`/MDd` |
 | SQLCipher 特性参数回退 | 编译成功但功能或数据库行为变化 | 固定 CI 基线参数并校验 `PRAGMA compile_options` |
-| 系统 OpenSSL 被意外找到 | 开发机成功、干净机失败，版本不可审计 | 只允许使用 superbuild install/stage；禁止 PATH 回退 |
+| 系统 OpenSSL 被意外找到 | 开发机成功、干净机失败，版本不可审计 | 只允许使用匹配配置且 manifest 验证通过的仓库 stage；禁止 PATH 回退 |
 | Qt 和 SQLCipher 加载不同 OpenSSL | 同进程出现多套密码库、行为不一致且难以审计 | 两者统一使用 superbuild 生成的 OpenSSL 3.5.7，部署时禁止 PATH 回退 |
 | 将 Qt 官方构建使用的 3.5.4 永久当作发布版本 | 带入该补丁版之后已修复的安全问题 | 保持 OpenSSL 3.5 LTS 系列，当前开发固定 3.5.7，并在发布前重新核对安全公告 |
 | 3.5.7 已知 QUIC server 低危问题 | 若未来应用暴露 QUIC server，可被消耗内存导致拒绝服务 | 当前不启用 QUIC server；发布前优先同步升级到已正式发布的 3.5.8 或更高 3.5.x |
@@ -476,45 +455,48 @@ CI checkout 必须初始化子模块，并验证其提交和依赖清单一致�
 | 将 Qt 的 OpenSSL 3 要求误解为任意 OpenSSL 主版本 | `qopensslbackend` 无法加载或 TLS 功能回退 | 使用 OpenSSL 3.x；通过官方 API/ABI 策略支持的安全 patch 更新，并在运行时断言 backend 与版本 |
 | ExternalProject 并行依赖描述不足 | 偶发配置/链接找不到产物 | 声明 `DEPENDS`、`BUILD_BYPRODUCTS` 和明确 install step |
 | 上游 Makefile 变量变化 | 升级 SQLCipher/OpenSSL 后构建脚本失效 | 每次依赖升级单独审阅对应标签的官方构建文件和 release notes |
-| 安装包仍从多个位置收集 DLL | 混入旧 DLL 或错误配置 | 所有部署和 NSIS 输入统一来自 stage |
+| 把依赖 DLL 复制进多个组件 stage | 重复二进制漂移，来源不唯一 | 保持组件 stage 单一职责，最终应用 stage 按 manifest 从各权威 stage 集中收集 |
 
 ## 13. 分阶段实施建议
 
-### 阶段 A：工具和仓库基础
+### 阶段 A：工具和仓库基础（已完成）
 
-1. 修复 Git for Windows 子模块命令；
-2. 安装并固定 Perl、NASM；
-3. 补齐 Qt6 Core5Compat；
-4. 确认 VS2022 x64 + SDK 10.0.22621.0 的脚本化入口；
-5. 添加两个子模块并固定到准确提交。
+1. Git for Windows 2.45.1 可执行标准递归子模块命令；
+2. OpenSSL 构建所需 Perl、NASM 已纳入脚本预检；
+3. VS2022 x64 + SDK 10.0.22621.0 已由各依赖脚本初始化并验证；
+4. OpenSSL、SQLCipher、Brotli 等子模块已固定到准确提交。
 
-### 阶段 B：OpenSSL Release
+Qt6 Core5Compat 属于主程序接入阶段，尚未由本轮依赖构建处理。
 
-1. 建立最小 superbuild；
-2. 完成 OpenSSL 3.5.7 Release x64 的独立 build/install；
-3. 执行官方测试；
-4. 验证 headers、import library、DLL 和许可证。
+### 阶段 B：Brotli/OpenSSL Debug 与 Release（已完成）
 
-### 阶段 C：SQLCipher Release
+1. 完成 Brotli 1.2.0 的配置专用 stage；
+2. 完成 OpenSSL 3.5.7 Debug/Release x64 的独立 build/install；
+3. OpenSSL 以 `enable-brotli-dynamic` 消费匹配配置的 Brotli；
+4. 产物、测试和 manifest 已由各自脚本验证。
 
-1. 建立 SQLCipher 工作副本构建；
-2. 只链接阶段 B 的 OpenSSL；
-3. 固定 SQLiteBrowser CI 功能参数；
-4. 输出到统一 stage；
-5. 完成 SQLCipher 加密、兼容性和编译选项测试。
+### 阶段 C：SQLCipher Debug 与 Release（依赖级闭环已完成）
+
+1. NMake 只生成上游源码，CMake/MSBuild 直接编译 DLL 和 CLI；
+2. 只链接阶段 B 的匹配 OpenSSL stage；
+3. 固定并审计 SQLiteBrowser 所需功能参数；
+4. 输出 SQLCipher-only stage、linker PDB 和 manifest；
+5. Debug/Release 的 CTest provider smoke、导出、CRT、依赖和运行时 probe 已通过。
+
+官方 Tcl 测试、错误密钥、rekey 和真实数据库兼容性仍是发布门禁，不包含在“依赖级闭环已完成”中。
 
 ### 阶段 D：主程序与安装包
 
 1. 让内层 SQLiteBrowser 只消费 stage；
 2. 改进 SQLCipher imported target 的配置感知能力；
-3. 部署同一 stage 中的 OpenSSL 3.5.7 Crypto/SSL DLL 与 Qt OpenSSL backend；
+3. 从同一配置的权威 stage 集中部署 SQLCipher、OpenSSL 3.5.7 Crypto/SSL、Brotli DLL 与 Qt OpenSSL backend；
 4. 完成 Qt 部署和 NSIS 打包；
 5. 在干净 Windows 环境验证 OpenSSL backend、Schannel fallback、安装和运行。
 
-### 阶段 E：Debug 与 CI
+### 阶段 E：主程序 Debug 与 CI
 
-1. 为 OpenSSL、SQLCipher、主程序增加完全隔离的 Debug 链路；
-2. 核对 Debug CRT 和 DLL；
+1. 消费已完成的 OpenSSL/SQLCipher Debug stage，为主程序增加完全隔离的 Debug 链路；
+2. 核对最终应用 stage 的 Debug CRT 和 DLL；
 3. 将工具版本、子模块提交、测试和依赖清单纳入 CI；
 4. 在 Release 构建稳定后再将其作为 v4.0.0 的正式发布基础。
 5. 发布候选冻结前检查 OpenSSL 3.5 漏洞页；如 3.5.8 或更高 3.5.x 已发布，开发、CI 和发布整体升级后重新验收。
@@ -525,7 +507,7 @@ CI checkout 必须初始化子模块，并验证其提交和依赖清单一致�
 
 源码版本虽然固定，但编译器、SDK、参数、输出位置和依赖关系仍依赖人工操作，无法达到“同一套构建环境”的目标。
 
-### 14.2 直接修改两个子模块的上游构建文件
+### 14.2 直接修改上游子模块构建文件
 
 这会让子模块长期保持本地补丁，升级标签时冲突较多。优先在父仓库维护 wrapper CMake 和命令参数；只有上游构建机制无法满足必要功能时，才维护最小补丁并记录原因。
 
@@ -539,13 +521,13 @@ CI checkout 必须初始化子模块，并验证其提交和依赖清单一致�
 
 ## 15. 最终建议
 
-建议接受“两个官方源码 submodule + 独立 CMake superbuild + 统一 stage”的总体方向。开发环境、CI 和正式构建都必须使用 superbuild 生成的 OpenSSL 3，不再允许使用现有 OpenSSL 4 及其 SQLCipher 二进制。实施前先解决 Git 子模块命令、Perl/NASM 和 Qt6 Core5Compat 三个前置问题。
+继续采用“固定源码 submodule + 配置专用组件 stage + manifest 契约 + 未来根级编排”的方向。开发环境、CI 和正式构建都必须使用仓库 wrapper 生成的 OpenSSL 3，不允许回退到系统 OpenSSL 4 或旧 SQLCipher 二进制。Brotli、OpenSSL、SQLCipher 的依赖级 Debug/Release 链路已经完成；下一步是主工程、CI、最终应用 stage 和安装器接入。
 
 首个里程碑应限定为：
 
-> 在 VS2022、MSVC v143、Windows SDK 10.0.22621.0 下，从固定提交的 OpenSSL 3.5.7 和 SQLCipher 4.18.0 源码开始，一条命令生成 Release x64 SQLiteBrowser 及可在干净 Windows 环境运行的安装包；SQLCipher 和 Qt OpenSSL TLS backend 使用同一套 OpenSSL 3.5.7 运行时。
+> 在 VS2022、MSVC v143、Windows SDK 10.0.22621.0 下，从固定提交的 Brotli 1.2.0、OpenSSL 3.5.7 和 SQLCipher 4.18.0 源码开始，一条命令生成 Release x64 SQLiteBrowser 及可在干净 Windows 环境运行的安装包；SQLCipher 和 Qt OpenSSL TLS backend 使用同一套 OpenSSL 3.5.7/Brotli 运行时。
 
-达到该里程碑后，再补齐 Debug、多配置易用性和依赖升级自动化。这个顺序能最大限度避免把源码引入、构建系统重构、Qt 迁移、运行库兼容和发布版本变更同时叠加。
+依赖级 Debug 已经具备，主程序接入时应同步保留配置隔离。完成上述里程碑后，再补齐 Tcl 专项测试、数据库迁移样本、干净机验证和依赖升级自动化。
 
 ## 16. 官方资料
 

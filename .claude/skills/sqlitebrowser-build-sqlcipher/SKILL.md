@@ -1,6 +1,6 @@
 ---
 name: sqlitebrowser-build-sqlcipher
-description: Build, verify, and stage the repository-pinned SQLCipher 4.18.0 against the matching OpenSSL 3.5.7 stages on Windows x64 with Visual Studio 2022 and SDK 10.0.22621.0. Use for SQLCipher environment checks, Debug or Release builds, artifact verification, or staging in this SQLiteBrowser repository; do not use for Tcl test claims, system installation, or non-Windows targets.
+description: Build, CTest, verify, and stage the repository-pinned SQLCipher 4.18.0 with CMake/MSBuild against matching OpenSSL 3.5.7 dynamic-Brotli stages on Windows x64 with Visual Studio 2022 and SDK 10.0.22621.0. Use for SQLCipher environment checks, Debug or Release builds, provider smoke tests, artifact verification, or staging in this SQLiteBrowser repository; do not use for Tcl-suite claims, system installation, final app packaging, or non-Windows targets.
 ---
 
 # SQLiteBrowser SQLCipher Build
