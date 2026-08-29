@@ -1,312 +1,353 @@
-# DB Browser for SQLite 当前构建方式分析
+# DB Browser for SQLite 当前构建方式与目标 Preset 分析
 
-> 文档性质：升级前只读分析  
-> 分析日期：2026-08-23  
-> 分析基线：`1debae535a418b66267db56739a9bc0c9b4ac37b`  
-> 目标约束：仅面向 Windows，计划使用 Visual Studio 2022 与 Windows SDK `10.0.22621.0`  
-> 本文不代表已经完成构建迁移，也不包含对源码或构建配置的修改。
+> 文档性质：当前分支只读分析与下一阶段设计
+> 最后更新：2026-08-28
+> 当前分支：`upgrade/v4.0.0`
+> 分析基线：`1a6e345c37403f7fa20d2e029be5abd5fdfa9b8b`
+> 目标平台：Windows x64
+> 目标工具链：Visual Studio 2022、MSVC v143、Windows SDK `10.0.26100.0`
+> 目标 Qt：Qt 6.11.1，由使用者提供安装根目录
+> 当前已新增可版本化的 Preset 模板；主工程 CMake、源码、CI 和安装器仍未修改。
 
-## 1. 结论摘要
+## 1. 结论
 
-当前项目采用 **CMake + Qt + MSVC/Ninja** 的构建体系：
+当前应用仍由根目录 `CMakeLists.txt` 直接配置。仓库提供 `CMakePresets.template.json`，开发者需要复制为本地 `CMakePresets.json` 并填写 Qt 根目录。依赖库的源码、构建脚本和 Debug/Release stage 已经完成，但主工程尚未完成严格 finder 和运行时部署改造。
 
-- 根目录 `CMakeLists.txt` 是应用程序、测试、安装规则和 CPack 配置的总入口。
-- Windows x86/x64 的正式构建基线位于 `.github/workflows/cppcmake-windows.yml`。
-- 该 Windows 流程虽然运行在 GitHub 的 `windows-2022` runner 上，但会额外安装并显式激活 **Visual Studio 2019**，同时安装 Windows 10 SDK `10.0.19041`；因此它目前不是 VS2022 构建。
-- x86/x64 默认使用 Qt `5.15.2` 的 MSVC 2019 预编译包、OpenSSL `1.1.1`、动态下载的最新 SQLite、SQLCipher `4.6.1`，并同时构建 SQLite 与 SQLCipher 两套应用。
-- CMake 使用 `Ninja Multi-Config` 生成器，构建和测试均使用 `Release` 配置。
-- Windows MSI 不是由 CPack 生成，而是由 `installer/windows` 下的 **WiX Toolset v3** 脚本生成；ZIP 又通过解包 MSI 得到。
-- Windows ARM64 已有一条 VS2022 + Qt6 的独立流程，可以作为工具链迁移的参考，但它有独立安装器和依赖处理方式，不能直接等同于 x64 方案。
-- 迁移到 VS2022 + SDK `10.0.22621.0` 时，至少需要同步处理 CI 工具链选择、SDK 锁定、Qt/CRT 二进制兼容性、WiX 中的 VC 运行库来源，以及版本号的多个硬编码位置。
+下一阶段建议建立两个同名 configure/build/test preset：
 
-本次没有执行 CMake configure、编译或测试，因为这些操作会生成构建目录和缓存，不符合“除分析文档外不做改动”的限制。
-
-## 2. 仓库与分支现状
-
-### 2.1 Git 状态
-
-- 当前工作分支：`upgrade/v4.0.0`
-- `master`、`origin/master` 与当前分支均指向同一提交 `1debae53`。
-- `origin` 指向 fork：`https://github.com/wpp2014/SQLiteBrowser.git`
-- `upstream` 指向上游：`https://github.com/sqlitebrowser/sqlitebrowser.git`
-- 当前仓库不是 shallow clone，但本地没有 tag。
-- 分析开始前工作区干净。
-
-“只 fork 了 master”本身不妨碍升级开发，但当前缺少 tag 会带来两个问题：
-
-1. 无法仅依赖本地 tag 还原历史发布边界或比较 `v3.13.1...HEAD`。
-2. 新版本发布前需要明确 fork 自己的 tag/release 策略，不能假设上游发布 tag 已经存在于本地。
-
-另一个重要事实是：本地 `HEAD` 的提交日期为 **2026-08-09**，并不是两年前。仓库中 `README.md` 记录的最近稳定版是 2024-10-16 发布的 `3.13.1`，但 master 分支仍有之后的开发提交。后续升级应以实际提交基线为准，而不是仅以最近稳定版日期判断代码年龄。
-
-### 2.2 CI 对分支的影响
-
-总 CI `.github/workflows/cppcmake.yml` 的 `push` 触发器只监听 `master`。因此：
-
-- 将 `upgrade/v4.0.0` 直接推送到 fork 时，不会因普通 push 自动运行总 CI。
-- 针对该分支创建 Pull Request，或手动执行 `workflow_dispatch`，可以触发 CI。
-- 总 CI 当前会同时调用 macOS、Ubuntu、Windows x86/x64 和 Windows ARM64；这与“以后只针对 Windows”的目标不一致。
-- 总 CI 的发布任务依赖所有平台构建成功。如果未来只保留 Windows 发布，需要调整 CI 编排，而不只是 Windows 子工作流。
-
-## 3. CMake 构建模型
-
-### 3.1 顶层入口
-
-根目录 `CMakeLists.txt`：
-
-- 要求 CMake `3.16` 或更高版本。
-- 项目名为 `sqlitebrowser`。
-- CMake 项目版本为 `3.13.99`。
-- 启用 Qt 的 `AUTOMOC`、`AUTORCC` 和 `AUTOUIC`。
-- 生成 GUI 可执行文件；Windows 下设置 `WIN32_EXECUTABLE`。
-- 根据 Qt 主版本选择 C++ 标准：Qt5 使用 C++14，Qt6 使用 C++17。
-- 查找 Qt 的 Concurrent、Gui、LinguistTools、Network、PrintSupport、Test、Widgets、Xml 等组件；Qt6 额外依赖 Core5Compat。
-- 查找 SQLite3；启用 `sqlcipher` 选项时改为查找 SQLCipher。
-- 通过 `config/*.cmake` 组织平台、第三方库、翻译和安装逻辑。
-- `ENABLE_TESTING=ON` 时加入 `src/tests`。
-
-项目没有 `CMakePresets.json`，所以当前没有一个仓库内、可复用且能明确表达 VS 版本、体系结构、SDK 版本和依赖路径的本地构建预设。实际构建参数主要存在于 GitHub Actions 命令中。
-
-### 3.2 主要 CMake 选项
-
-`config/options.cmake` 定义了以下关键选项：
-
-| 选项 | 默认值 | 作用 |
-| --- | --- | --- |
-| `QT_MAJOR` | `Qt5` | 选择 Qt5 或 Qt6 |
-| `BUILD_STABLE_VERSION` | `OFF` | 控制稳定版与日期型开发版版本信息 |
-| `ENABLE_TESTING` | `OFF` | 是否构建测试 |
-| `FORCE_INTERNAL_QSCINTILLA` | `OFF` | 强制使用仓库内 QScintilla |
-| `FORCE_INTERNAL_QCUSTOMPLOT` | `ON` | 默认使用仓库内 QCustomPlot |
-| `FORCE_INTERNAL_QHEXEDIT` | `ON` | 默认使用仓库内 QHexEdit |
-| `ALL_WARNINGS` | `OFF` | 启用额外警告 |
-| `sqlcipher` | `OFF` | 构建 SQLCipher 版本 |
-
-QScintilla 会先尝试查找系统安装版本，找不到时使用仓库内版本；QCustomPlot 与 QHexEdit 默认直接使用仓库内源码。
-
-### 3.3 Windows 平台逻辑
-
-`config/platform_win.cmake` 当前包含以下 MSVC 特有行为：
-
-- Qt5 要求 OpenSSL `1.1.1`，Qt6 要求 OpenSSL `3.0.0`。
-- Release x64 链接参数写入 `/SUBSYSTEM:WINDOWS,5.02 /ENTRY:mainCRTStartup`。
-- Debug 和 RelWithDebInfo 使用控制台子系统。
-- 将 `src/winapp.rc` 加入目标，用于图标和 Windows 版本资源。
-
-`config/install.cmake` 的 Windows 安装步骤会：
-
-- 安装应用 EXE。
-- 查找并安装 `sqlite3.dll` 或 `sqlcipher.dll`。
-- 查找并安装 OpenSSL 的 crypto/ssl DLL。
-- 安装许可证文件。
-- 查找并调用 `windeployqt.exe` 部署 Qt 运行时。
-
-这套 CMake install/CPack 规则存在，但当前 GitHub Actions 的正式 MSI 流程主要直接消费构建输出和依赖目录，并不以 CPack 作为最终 Windows 发布链路。
-
-## 4. 当前 Windows x86/x64 CI 构建链路
-
-`.github/workflows/cppcmake-windows.yml` 的矩阵为：
-
-- runner：`windows-2022`
-- 架构：`x86`、`x64`
-
-完整链路如下：
-
-1. 安装 Ninja。
-2. 安装 OpenSSL `1.1.1.2100`；x86 与 x64 使用不同 Chocolatey 安装路径。
-3. 安装 Qt `5.15.2`：
-   - x86：`win32_msvc2019`
-   - x64：`win64_msvc2019_64`
-4. 额外安装 Visual Studio 2019 Community，并包含：
-   - `Microsoft.VisualStudio.Component.VC.Tools.x86.x64`
-   - `Microsoft.VisualStudio.Component.Windows10SDK.19041`
-   - `Microsoft.VisualStudio.Component.VC.Redist.MSM`
-5. 通过 `ilammy/msvc-dev-cmd` 显式选择 VS2019 工具链。
-6. 从 SQLite 官网动态解析并下载“最新” amalgamation 源码，使用 `cl` 构建 `sqlite3.dll`。
-7. 下载 SQLean：x86 固定为 `0.27.4`，x64 下载当时最新 release。
-8. 构建项目自带的 `formats.dll` SQLite 扩展。
-9. 下载并使用 `nmake` 构建 SQLCipher `4.6.1`。
-10. 分别配置两个构建目录：
-    - `release-sqlite`
-    - `release-sqlcipher`
-11. 两套配置都使用 `Ninja Multi-Config`、启用测试，并执行 Release 构建。
-12. 对两套构建分别执行 `ctest -C Release --output-on-failure`。
-13. 调用 `installer/windows/build.cmd` 创建 MSI。
-14. 将未签名 MSI 上传到 SignPath，等待签名结果。
-15. 通过 `msiexec /a` 解包 MSI，再压缩为 ZIP。
-16. 上传 MSI 和 ZIP，并记录实际依赖版本摘要。
-
-### 4.1 当前 SDK 并未锁定在 CMake 参数中
-
-现有流程安装 SDK `10.0.19041`，但 CMake 命令没有传入 `CMAKE_SYSTEM_VERSION`。SDK 的实际选择依赖激活的 VS2019 开发环境及其可用 SDK。
-
-未来若要求严格使用 `10.0.22621.0`，仅把 runner 保持为 `windows-2022` 或把 `vsversion` 改为 `2022` 都不够。迁移实现中需要：
-
-- 确保 VS2022 安装了 `Microsoft.VisualStudio.Component.Windows11SDK.22621`（组件命名应在实施时验证）。
-- 在工具链初始化或 CMake 配置阶段明确选择 SDK。
-- 在构建日志中输出并校验最终使用的 Windows SDK 版本，避免机器上同时存在多个 SDK 时静默选择更高版本。
-
-使用 Visual Studio 生成器时，典型表达形式会包含 `-G "Visual Studio 17 2022" -A x64 -T v143 -DCMAKE_SYSTEM_VERSION=10.0.22621.0`；如果继续使用 Ninja Multi-Config，则需要先用 VS2022/v143/指定 SDK 初始化开发环境，再运行 CMake。最终选哪一种应在迁移方案阶段确定。
-
-## 5. 测试体系
-
-测试由 CMake/CTest 管理，`src/tests/CMakeLists.txt` 当前定义四个测试可执行文件：
-
-- `test-sqlobjects`
-- `test-import`
-- `test-regex`
-- `test-cache`
-
-Windows CI 会对 SQLite 和 SQLCipher 两种构建分别运行全部 CTest。现有测试主要是单元级测试，尚未看到安装后启动、DLL 完整性、MSI 升级/卸载、文件关联、签名验证等 Windows 发布物级自动化测试。
-
-因此 VS2022 迁移的验证不能只以“编译成功”作为完成标准，至少还应覆盖：
-
-- SQLite 与 SQLCipher 两个 EXE 可启动。
-- Qt、OpenSSL、SQLite/SQLCipher DLL 装载正常。
-- 四个 CTest 在 Release 下通过。
-- MSI 安装、启动、升级和卸载路径正常。
-- ZIP 解压后可独立运行。
-- x64/x86/ARM64 中实际保留的目标架构分别验证。
-
-## 6. Windows 安装与发布
-
-### 6.1 WiX MSI
-
-标准 x86/x64 安装器位于 `installer/windows`：
-
-- `build.cmd` 调用 WiX `candle.exe` 与 `light.exe`。
-- 支持 `x86` 和 `x64` 参数。
-- `variables.wxi` 将产品版本硬编码为 `3.13.99`。
-- VC 运行库合并模块路径硬编码到 VS2019 Community 的 `14.29.30133` 目录。
-- 合并模块名硬编码为 `Microsoft_VC142_CRT_$(sys.BUILDARCH).msm`。
-- 构建输出路径固定为 `release-sqlite/Release` 和 `release-sqlcipher/Release`。
-
-因此 VS2022 迁移必须同步更新安装器的 VC142/VS2019 假设，否则即使应用已经由 v143 编译，MSI 仍可能打入错误或不存在的 CRT 合并模块。
-
-ARM64 安装器位于 `installer/windows_on_arm`，已经引用 VS2022 的 VC143 CRT 路径，但路径中包含特定 Enterprise 安装位置和精确工具集版本号，仍然不具备跨 runner/开发机的可移植性。
-
-### 6.2 CPack 与实际发布物
-
-顶层 CMake 在 Windows 下默认设置 CPack ZIP，并保留 NSIS/WiX 相关参数；但当前 CI 的实际发布物来源是：
-
-- WiX 脚本生成 MSI。
-- `msiexec /a` 从 MSI 提取文件。
-- PowerShell `Compress-Archive` 生成 ZIP。
-
-也就是说，当前仓库同时存在 CPack 打包配置和独立 WiX 发布链路，但 CI 以独立 WiX 链路为准。升级时应明确哪个才是唯一受支持的发布路径，避免两套打包定义继续漂移。
-
-### 6.3 GitHub Release
-
-总 CI 对非 Pull Request 构建会调用 `.github/workflows/release.yml`，发布到可移动的 `nightly` 或 `continuous` tag，并统一标记为 prerelease。单独手动运行 Windows 子工作流时会使用基于提交 SHA 的 Windows tag。
-
-这套工作流没有直接表达“创建稳定版 `v4.0.0`”的流程。因此新稳定版本至少还需要单独设计：
-
-- 稳定版 tag 命名。
-- Release 是否为 prerelease。
-- MSI/ZIP 文件名中的稳定版本号。
-- 签名策略从测试签名切换到正式签名。
-- Winget 发布触发条件。
-- 更新日志与升级兼容策略。
-
-## 7. 当前依赖基线
-
-| 依赖 | 当前来源/版本 | 可复现性观察 |
-| --- | --- | --- |
-| Qt（x86/x64） | install-qt-action，Qt `5.15.2`，MSVC2019 包 | 版本固定 |
-| Qt（ARM64） | Qt6 | 与标准 x86/x64 流程不同 |
-| OpenSSL（x86/x64） | Chocolatey `1.1.1.2100` | 包版本固定，但 OpenSSL 1.1.1 已是旧主线 |
-| SQLite | 构建时从官网解析最新 amalgamation | 未固定版本，构建不可完全复现 |
-| SQLCipher | `4.6.1` | 固定版本 |
-| SQLean x86 | `0.27.4` | 固定版本 |
-| SQLean x64 | GitHub 最新 release | 未固定版本 |
-| QScintilla | 仓库内 `2.14.1`，系统找不到时回退 | 结果依赖环境；CI 通常回退到内置版本 |
-| QCustomPlot | 仓库内 `2.1.1` | 固定版本 |
-| QHexEdit | 仓库内 `0.8.6` | 固定版本 |
-| nlohmann/json | 仓库内 `3.10.4` 单头文件 | 固定版本 |
-| WiX | Windows 安装器使用 WiX v3 工具 | 依赖 runner/环境提供，路径处理不统一 |
-
-当前最大可复现性问题是 SQLite 与 x64 SQLean 使用“最新版本”。这意味着同一个项目提交在不同日期构建，可能得到不同二进制和行为。版本升级期间应优先改为显式版本和校验值。
-
-## 8. 版本号来源与 4.0.0 风险
-
-当前至少存在三套版本来源：
-
-1. `CMakeLists.txt`：项目开发版本 `3.13.99`。
-2. `installer/windows/variables.wxi` 与 `installer/windows_on_arm/variables.wxi`：MSI 产品版本 `3.13.99`。
-3. `currentrelease`：稳定版本 `3.13.1` 及其发布页面。
-
-此外：
-
-- `src/version.h.in` 从 CMake 项目版本生成应用版本宏。
-- 非稳定构建默认附加 `YYYYMMDD` 日期型 `BUILD_VERSION`。
-- `src/winapp.rc` 使用这些宏生成 Windows 文件版本和产品版本。
-- CI 产物文件名对 nightly 使用日期，对开发构建使用 Git 短 SHA，并不直接使用 CMake 项目版本。
-
-因此新建 `4.0.0` 版本不应只是替换某一个字符串。建议在升级实施前先确定一个“唯一版本源”，再让 CMake、Windows 资源、WiX、产物命名和 Release tag 从该来源派生。否则很容易出现应用 About 页面、EXE 属性、MSI 产品版本和 GitHub Release 名称互不一致。
-
-还需注意 WiX/MSI 的版本和 UpgradeCode/ProductCode 规则。跨到 `4.0.0` 是否能覆盖升级旧的 3.x 安装，需要通过 MSI 升级场景验证，而不能仅凭版本字符串判断。
-
-## 9. 与目标工具链的差距
-
-| 项目 | 当前 x86/x64 状态 | 目标 | 差距 |
+| Preset | Binary directory | Configuration | Dependency stage |
 | --- | --- | --- | --- |
-| 操作系统范围 | CI 同时覆盖 Windows、Linux、macOS | 仅 Windows | 需调整总 CI 与发布依赖关系 |
-| 编译器 | VS2019 / v142 | VS2022 / v143 | 需切换开发环境和运行库打包 |
-| Windows SDK | 安装 10.0.19041，未在 CMake 显式锁定 | 10.0.22621.0 | 需安装、选择并校验 |
-| CMake 生成器 | Ninja Multi-Config | 尚未决定 | 可继续 Ninja，也可改 VS 2022 生成器 |
-| Qt | Qt 5.15.2 MSVC2019 预编译包 | 尚未决定 | 需决定保留 Qt5 还是统一到 Qt6，并验证 VS2022 兼容性 |
-| 架构 | x86、x64，另有 ARM64 | 尚未决定 | “仅 Windows”不足以确定保留哪些架构 |
-| 安装器 CRT | VS2019 VC142 合并模块硬编码 | VS2022 VC143 | 必须更新并去除脆弱的绝对版本路径 |
-| 版本源 | 多处硬编码 | 4.0.0 | 需统一版本来源与稳定发布流程 |
+| `debug` | `build/x64-shared-debug` | Debug | `x64-debug` |
+| `release` | `build/x64-shared-release` | Release | `x64-release` |
 
-## 10. 建议的升级顺序（仅建议，尚未实施）
+命令语义必须明确：
 
-建议把升级拆成可验证的小阶段：
+```cmd
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
 
-1. **冻结基线**：补齐上游 tag 信息，记录当前依赖实际版本，并确定首要目标架构。若没有兼容需求，建议先以 Windows x64 为最小闭环。
-2. **建立可重复的本地构建入口**：增加 CMake Preset 或等效脚本，明确 VS2022/v143、SDK `10.0.22621.0`、架构、Qt 路径和依赖路径。
-3. **只迁移编译器与 SDK**：暂不同时升级 Qt/SQLite/SQLCipher，先让现有代码在 VS2022 + 指定 SDK 下编译并通过 CTest，以缩小问题来源。
-4. **迁移 Windows CI**：把 VS2019/19041 替换为 VS2022/22621，并在日志中验证实际工具链；将 fork 的 CI 改为 Windows 范围。
-5. **修正发布物链路**：升级或整理 WiX 配置、VC143 运行库部署、签名、MSI/ZIP 冒烟测试。
-6. **逐项升级第三方依赖**：每次只升级一类依赖，固定版本与校验值，并保留可回退提交。
-7. **统一版本管理**：将版本号集中到单一来源，再切换为 `4.0.0` 候选版本。
-8. **发布候选版**：先发布 `4.0.0-rc` 或等效预发布版本，验证旧版本升级、全新安装、便携 ZIP 和签名。
-9. **稳定发布**：创建稳定 tag/release，更新 `currentrelease`、变更日志和 Winget 流程。
+cmake --preset release
+cmake --build --preset release
+ctest --preset release
+```
 
-不建议在同一个提交中同时完成 VS2022、SDK、Qt 主版本、SQLite/SQLCipher、WiX 和应用版本号升级；这些变化的故障表现高度重叠，会显著增加定位难度。
+`cmake --preset <name>` 只负责 configure，不会自动编译。若以后希望一条命令完成 configure/build/test，可另加 workflow preset，并使用 `cmake --workflow --preset <name>`。
 
-## 11. 尚需确认的决策
+构建完成后，应用目录必须是自包含的运行目录，不依赖开发者临时设置 Qt、OpenSSL 或 SQLCipher PATH。
 
-进入修改阶段前，建议由维护者明确以下事项：
+## 2. 当前主工程 CMake 模型
 
-1. Windows 架构范围：仅 x64，还是保留 x86 与 ARM64？
-2. Qt 路线：保留 Qt 5.15.2，还是迁移 Qt6？
-3. 是否继续同时发布 SQLite 与 SQLCipher 两个应用？
-4. 是否继续使用 WiX v3，还是迁移到较新的安装器方案？
-5. 是否保留 CPack Windows 配置，还是明确 WiX 为唯一发布链路？
-6. `4.0.0` 是否表示存在不兼容变更；如果只是工具链和依赖升级，是否更适合沿用 3.x 语义？
-7. fork 的 GitHub Actions 是否具备 SignPath secrets；没有时是否允许生成未签名测试包？
-8. 稳定发布是否需要自动发布到 Winget？
+### 2.1 顶层目标
 
-## 12. 本机环境观察
+根 `CMakeLists.txt` 当前：
 
-本次只读检查显示当前开发机已经具备：
+- 最低要求 CMake 3.16；
+- 项目版本为 `3.13.99`；
+- 生成目标 `sqlitebrowser`；
+- Qt5 使用 C++14，Qt6 使用 C++17；
+- Qt6 依赖 Concurrent、Gui、LinguistTools、Network、PrintSupport、Test、Widgets、Xml 和 Core5Compat；
+- `sqlcipher=ON` 时查找 `SQLCipher::SQLCipher`，否则查找 `SQLite::SQLite3`；
+- `ENABLE_TESTING=ON` 时构建四个 CTest；
+- 没有统一的配置专用 runtime 输出目录；
+- 没有 build-time deploy target。
 
-- CMake `3.30.3`
-- Ninja `1.12.1`
-- Visual Studio Enterprise 2022 `17.14.37`
-- Windows SDK `10.0.22621.0`（同时还安装了 `10.0.10240.0` 与 `10.0.26100.0`）
+在 Windows 且 `sqlcipher=ON` 时，当前输出名为 `DB Browser for SQLCipher.exe`。如果后续希望 SQLCipher-enabled 构建仍显示“DB Browser for SQLite”，应作为产品命名决策单独处理，不能在 Preset 迁移中隐式改变。
 
-这说明目标 SDK 在本机存在，但多个 SDK 并存进一步说明后续必须显式选择并验证 `10.0.22621.0`。本次未检查 Qt、OpenSSL、SQLite/SQLCipher 的本机可用性，也未尝试配置项目。
+### 2.2 内置 Qt 库
 
-## 13. 文档路径评估
+QScintilla、QCustomPlot 和 QHexEdit 的 CMake 使用未指定类型的 `add_library()`，因此会受全局 `BUILD_SHARED_LIBS` 影响，但当前 wrapper 没有为全部库完整配置 Windows DLL 导出/导入宏。
 
-仓库此前没有 `docs/` 目录，已有的用户/贡献者文档（例如 `README.md`、`BUILDING.md`）位于根目录。尽管如此，本分析属于 fork 的升级过程记录，不宜在尚未验证前直接改写正式的 `BUILDING.md`。
+因此目标目录名中的 `shared` 应解释为“应用使用共享 Qt、SQLCipher、OpenSSL/Brotli 运行时”，不应在第一阶段把全局 `BUILD_SHARED_LIBS` 打开。建议 Preset 显式保持：
 
-本文件采用：
+```text
+BUILD_SHARED_LIBS=OFF
+FORCE_INTERNAL_QSCINTILLA=ON
+FORCE_INTERNAL_QCUSTOMPLOT=ON
+FORCE_INTERNAL_QHEXEDIT=ON
+```
 
-`docs/upgrade/v4.0.0/current-build-analysis.md`
+这样三个内置库保持静态链接到应用，同时避免开发机上偶然找到不同版本的系统库。
 
-该路径符合用户要求的 `./docs` 范围，并为后续的迁移方案、实施记录、依赖清单和测试报告预留了同一版本目录。因此目前判断 **不需要调整路径**，也没有移动现有文档。
+### 2.3 Windows 平台逻辑
 
-如果未来目标变为向上游提交正式构建说明，则应在升级完成并验证后，再把最终、稳定的用户操作部分整理回根目录 `BUILDING.md`；这属于后续改动，需要维护者另行确认。
+`config/platform_win.cmake` 仍包含旧的显式 linker flags：
+
+```text
+/SUBSYSTEM:WINDOWS,5.02
+/ENTRY:mainCRTStartup
+```
+
+Debug/RelWithDebInfo 则使用控制台子系统和 `_CONSOLE`。
+
+对于 VS2022 + Qt6，不建议继续用旧子系统版本和手写 entry point 覆盖 `WIN32_EXECUTABLE` 的默认行为。实施阶段应删除或重构这些 flags，并分别验证：
+
+- Release 为 Windows GUI 子系统；
+- Debug 是否继续保留控制台；
+- Qt6 启动入口正常；
+- 最低 Windows 版本由明确的产品策略决定，而不是由历史 `5.02` 偶然决定。
+
+## 3. 当前依赖 stage
+
+已存在以下 x64 Debug/Release stage：
+
+| 依赖 | 版本 | 主要运行时 |
+| --- | --- | --- |
+| Brotli | 1.2.0 | `brotlicommon.dll`、`brotlidec.dll`、`brotlienc.dll` |
+| zlib | 1.3.2 | `zlib1.dll` |
+| zstd | 1.5.7 | `libzstd.dll` |
+| OpenSSL | 3.5.7 | `libcrypto-3-x64.dll`、`libssl-3-x64.dll`，并动态使用 Brotli |
+| SQLCipher | 4.18.0 / SQLite 3.53.4 | `sqlcipher.dll` |
+
+SQLCipher 与 OpenSSL 的配置必须严格对应：
+
+```text
+Debug application
+  -> SQLCipher x64-debug
+  -> OpenSSL x64-debug
+  -> Brotli x64-debug
+  -> /MDd
+
+Release application
+  -> SQLCipher x64-release
+  -> OpenSSL x64-release
+  -> Brotli x64-release
+  -> /MD
+```
+
+zlib 和 zstd 当前没有进入 DB Browser 主程序、SQLCipher 或当前 OpenSSL 的实际链接图。不能因为它们已经构建就无条件复制到应用目录；只有后续 target 或插件真实依赖时才部署。
+
+### 3.1 SDK 不一致
+
+本机已安装 SDK `10.0.26100.0`，但现有 Brotli、zlib、zstd、OpenSSL 和 SQLCipher manifest 全部记录为 SDK `10.0.22621.0`。
+
+同一 MSVC v143 和 DLL CRT 模型下，使用 22621 构建的依赖通常可以被 26100 构建的应用链接和加载，因此可用于第一轮主程序接入验证。但这不满足“所有产物来自同一 SDK”的严格可复现要求。
+
+建议采用两级门禁：
+
+1. 主程序 bring-up 阶段允许消费现有 22621 stage，但配置日志必须明确警告 SDK 不一致。
+2. CI、正式安装包和 Release 候选阶段，全部依赖必须用 SDK `10.0.26100.0` 重建，manifest 校验不一致时直接失败。
+
+## 4. 当前依赖发现问题
+
+### 4.1 SQLCipher finder
+
+`cmake/FindSQLCipher.cmake` 当前只找到 header 和 `sqlcipher.lib`，并把 import library 写入 `IMPORTED_LOCATION`。它没有：
+
+- 查找 `sqlcipher.dll`；
+- 区分 `IMPORTED_IMPLIB` 与 `IMPORTED_LOCATION`；
+- 暴露可靠的 runtime DLL 路径；
+- 校验配置、CRT、manifest 或固定版本；
+- 阻止 Debug/Release stage 混用。
+
+实施时应让 `SQLCipher::SQLCipher` 成为正确的 Windows shared imported target：
+
+```text
+IMPORTED_IMPLIB  -> <stage>/lib/sqlcipher.lib
+IMPORTED_LOCATION -> <stage>/bin/sqlcipher.dll
+INTERFACE_INCLUDE_DIRECTORIES -> <stage>/include/sqlcipher
+```
+
+由于 debug/release preset 使用独立 binary directory，每个 configure 只接受一个配置专用 `SQLCIPHER_ROOT_DIR`，可以先采用单配置 stage finder；后续若需要一个 build tree 同时处理多个配置，再扩展 `IMPORTED_*_DEBUG/RELEASE`。
+
+### 4.2 OpenSSL
+
+项目当前使用普通 `find_package(OpenSSL ...)`，可能优先进入 CMake 内置 FindOpenSSL module。项目 OpenSSL stage 已提供 `OpenSSLConfig.cmake`，并正确声明：
+
+- `OpenSSL::Crypto` 的 DLL 与 import library；
+- `OpenSSL::SSL` 的 DLL 与 import library；
+- `OPENSSL_RUNTIME_DIR`。
+
+Windows 目标构建应优先使用配置模式并显式传入配置专用 `OpenSSL_DIR`，禁止扫描系统 OpenSSL。
+
+## 5. Preset 设计
+
+仓库提交 `CMakePresets.template.json`，其中 Qt 路径使用以下占位符：
+
+```text
+REPLACE_WITH_QT_6_11_1_MSVC2022_X64_ROOT
+```
+
+克隆仓库后应复制模板，不应移动或重命名被 Git 跟踪的模板：
+
+```cmd
+copy CMakePresets.template.json CMakePresets.json
+```
+
+然后只修改本地 `CMakePresets.json` 中的 `CMAKE_PREFIX_PATH`。Windows 路径建议使用 JSON 友好的正斜杠，例如：
+
+```json
+"CMAKE_PREFIX_PATH": "D:/Qt/6.11.1/msvc2022_64"
+```
+
+`CMakePresets.json` 和 `CMakeUserPresets.json` 已加入根 `.gitignore`，本机绝对路径不会进入提交；模板保持版本化。CMake 只识别复数形式 `CMakePresets.json`，`CMakePreset.json` 不会生效。
+
+建议结构如下，具体字段在工程实施时验证：
+
+```json
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 30,
+    "patch": 3
+  },
+  "configurePresets": [
+    {
+      "name": "windows-x64-base",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "set"
+      },
+      "toolset": {
+        "value": "v143",
+        "strategy": "set"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_VERSION": "10.0.26100.0",
+        "CMAKE_PREFIX_PATH": "REPLACE_WITH_QT_6_11_1_MSVC2022_X64_ROOT",
+        "QT_MAJOR": "Qt6",
+        "sqlcipher": "ON",
+        "ENABLE_TESTING": "ON",
+        "BUILD_SHARED_LIBS": "OFF",
+        "FORCE_INTERNAL_QSCINTILLA": "ON",
+        "FORCE_INTERNAL_QCUSTOMPLOT": "ON",
+        "FORCE_INTERNAL_QHEXEDIT": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "windows-x64-base",
+      "binaryDir": "${sourceDir}/build/x64-shared-debug",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Debug",
+        "OpenSSL_DIR": "${sourceDir}/build/openssl/x64-debug/stage/lib/cmake/OpenSSL",
+        "SQLCIPHER_ROOT_DIR": "${sourceDir}/build/sqlcipher/x64-debug/stage"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "windows-x64-base",
+      "binaryDir": "${sourceDir}/build/x64-shared-release",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Release",
+        "OpenSSL_DIR": "${sourceDir}/build/openssl/x64-release/stage/lib/cmake/OpenSSL",
+        "SQLCIPHER_ROOT_DIR": "${sourceDir}/build/sqlcipher/x64-release/stage"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
+```
+
+完整且应保持同步的定义以仓库根目录 `CMakePresets.template.json` 为准。配置专用 OpenSSL/SQLCipher stage 使用 `${sourceDir}` 相对路径，不需要本机修改。当前工程在 finder、部署和 SDK 校验完成前，使用模板仍不能保证最终应用目录可直接运行。
+
+## 6. 可直接运行的输出目录
+
+现有 `config/install.cmake` 只在 `cmake --install` 时复制部分 DLL 并调用 `windeployqt`，不能保证 `cmake --build --preset ...` 后的 EXE 目录可运行。
+
+建议主工程建立配置专用 runtime 目录：
+
+```text
+build/x64-shared-debug/bin/
+build/x64-shared-release/bin/
+```
+
+应用 target 的 Debug/Release runtime output 都指向对应 preset 的 `bin`。构建后运行部署 target，使用 `Qt6::windeployqt` 对 `$<TARGET_FILE:sqlitebrowser>` 执行正确的 `--debug` 或 `--release` 部署，并明确启用 compiler runtime 部署。
+
+项目自有依赖还需显式复制到同一个目录：
+
+```text
+sqlcipher.dll
+libcrypto-3-x64.dll
+libssl-3-x64.dll
+brotlicommon.dll
+brotlidec.dll
+brotlienc.dll
+```
+
+OpenSSL 对 Brotli 使用动态加载，`dumpbin /dependents libcrypto-3-x64.dll` 不会显示这三个 Brotli DLL；不能因此漏掉它们。
+
+Qt DLL 和 plugin 不维护手工文件清单，应交给与用户指定 Qt 安装相同的 `Qt6::windeployqt`。至少需要验证：
+
+- Qt6 Core/Gui/Widgets/Network/Concurrent/PrintSupport/Test/Xml/Core5Compat；
+- `platforms/qwindows.dll`；
+- TLS plugins，包括 OpenSSL 与 Schannel backend；
+- imageformats、styles、networkinformation 等实际扫描到的插件；
+- MSVC/UCRT runtime 部署结果。
+
+Debug 构建依赖 Microsoft Debug CRT，只保证在安装 VS2022 的开发机直接运行，不能作为可分发 portable 包。Release 才需要在未安装开发工具的干净机器上满足“复制后直接运行”。
+
+## 7. 验收标准
+
+### Configure
+
+- generator 为 Visual Studio 17 2022；
+- architecture 为 x64；
+- toolset 为 v143；
+- `CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION` 精确为 `10.0.26100.0`；
+- Qt 为用户指定的 6.11.1 MSVC2022 x64；
+- Core5Compat 和 `Qt6::windeployqt` 可用；
+- SQLCipher/OpenSSL stage 与配置匹配；
+- 不搜索系统 OpenSSL 或旧 SQLCipher。
+
+### Build and test
+
+- `cmake --build --preset debug` 成功；
+- `cmake --build --preset release` 成功；
+- 四个 CTest 在两个配置下运行；
+- Release 不依赖 Debug CRT；
+- SQLCipher DLL 只加载匹配配置的 OpenSSL；
+- 主程序和依赖均为 x64。
+
+### Runtime
+
+- EXE 在对应 `bin` 目录直接启动；
+- 临时移除 Qt 或 SQLCipher 必需 DLL 时能够明确失败，而不是从 PATH 偶然加载；
+- Qt TLS backend 能加载项目 OpenSSL 3.5.7；
+- 普通 SQLite 与 SQLCipher 数据库基本操作可用；
+- Release 目录复制到干净 Windows 环境后可启动。
+
+## 8. 当前未实施内容
+
+本轮没有创建或修改：
+
+- 本地 `CMakePresets.json` 已可由模板生成，但尚未执行 configure；
+- 根 `CMakeLists.txt`；
+- `FindSQLCipher.cmake`；
+- `platform_win.cmake`；
+- build-time deploy 规则；
+- CI、NSIS、WiX、版本号或应用源码。
+
+下一阶段工程修改应先完成 Preset、finder、输出目录和 deploy target，再实际执行 Debug/Release 主程序构建。

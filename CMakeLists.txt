@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.30.3)
 
 project(sqlitebrowser
     VERSION 3.13.99
@@ -10,32 +10,91 @@ include(GNUInstallDirs)
 
 include(config/options.cmake)
 
+if(NOT WIN32)
+    message(FATAL_ERROR "This v4.0.0 build path currently supports Windows only.")
+endif()
+
+if(NOT MSVC)
+    message(FATAL_ERROR "Visual Studio 2022 with MSVC is required.")
+endif()
+
+if(NOT CMAKE_GENERATOR STREQUAL "Visual Studio 17 2022")
+    message(FATAL_ERROR
+        "Visual Studio 17 2022 is required; actual generator: ${CMAKE_GENERATOR}")
+endif()
+
+if(NOT CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
+    message(FATAL_ERROR
+        "The x64 generator platform is required; actual platform: ${CMAKE_GENERATOR_PLATFORM}")
+endif()
+
+if(NOT CMAKE_VS_PLATFORM_TOOLSET STREQUAL "v143")
+    message(FATAL_ERROR
+        "The v143 platform toolset is required; actual toolset: ${CMAKE_VS_PLATFORM_TOOLSET}")
+endif()
+
+if(NOT CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION STREQUAL "10.0.26100.0")
+    message(FATAL_ERROR
+        "Windows SDK 10.0.26100.0 is required; actual SDK: ${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+endif()
+
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "A 64-bit compiler is required.")
+endif()
+
+if(NOT QT_MAJOR STREQUAL "Qt6")
+    message(FATAL_ERROR "Qt6 is required; actual QT_MAJOR: ${QT_MAJOR}")
+endif()
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
-add_executable(${PROJECT_NAME})
-
-
-if(QT_MAJOR STREQUAL "Qt5")
-    set(CMAKE_CXX_STANDARD 14)
-elseif(QT_MAJOR STREQUAL "Qt6")
-    set(CMAKE_CXX_STANDARD 17)
-else()
-    message(FATAL_ERROR "Uknown Qt Version: ${QT_MAJOR}")
-endif()
-
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" "${CMAKE_MODULE_PATH}")
 
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Release")
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
 endif()
 
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    WIN32_EXECUTABLE ON
-    MACOSX_BUNDLE ON
+find_package(Qt6 6.11.1 EXACT CONFIG REQUIRED
+    COMPONENTS
+        Concurrent
+        Core5Compat
+        Gui
+        LinguistTools
+        Network
+        PrintSupport
+        Widgets
+        Xml
 )
+
+if(ENABLE_TESTING)
+    find_package(Qt6 6.11.1 EXACT CONFIG REQUIRED COMPONENTS Test)
+endif()
+
+if(NOT TARGET Qt6::windeployqt)
+    message(FATAL_ERROR "Qt6::windeployqt is required but was not provided by the selected Qt package.")
+endif()
+
+message(STATUS "SQLiteBrowser toolchain:")
+message(STATUS "  Generator: ${CMAKE_GENERATOR}")
+message(STATUS "  Platform: ${CMAKE_GENERATOR_PLATFORM}")
+message(STATUS "  Toolset: ${CMAKE_VS_PLATFORM_TOOLSET}")
+message(STATUS "  Windows SDK: ${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+message(STATUS "  Qt: ${Qt6_VERSION}")
+message(STATUS "  Qt package: ${Qt6_DIR}")
+
+qt_add_executable(${PROJECT_NAME} WIN32)
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/bin"
+    PDB_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}/bin"
+    PDB_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/bin"
+    MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,Release>:ProgramDatabase>"
+)
+target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/DEBUG>")
 
 execute_process(
     COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short --verify HEAD
@@ -60,23 +119,18 @@ endif()
 
 include(config/platform.cmake)
 
-find_package(${QT_MAJOR} REQUIRED COMPONENTS Concurrent Gui LinguistTools Network PrintSupport Test Widgets Xml)
 set(QT_LIBS
-    ${QT_MAJOR}::Gui
-    ${QT_MAJOR}::Test
-    ${QT_MAJOR}::PrintSupport
-    ${QT_MAJOR}::Widgets
-    ${QT_MAJOR}::Network
-    ${QT_MAJOR}::Concurrent
-    ${QT_MAJOR}::Xml
+    Qt6::Gui
+    Qt6::PrintSupport
+    Qt6::Widgets
+    Qt6::Network
+    Qt6::Concurrent
+    Qt6::Xml
+    Qt6::Core5Compat
 )
-if(QT_MAJOR STREQUAL "Qt6")
-    find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
-    list(APPEND QT_LIBS Qt6::Core5Compat)
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        AUTOUIC_OPTIONS "--connections=string"
-    )
-endif()
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    AUTOUIC_OPTIONS "--connections=string"
+)
 
 target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${CMAKE_CURRENT_LIST_DIR}/libs/json)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR} src)
@@ -85,9 +139,8 @@ include(config/3dparty.cmake)
 
 # SQLCipher option
 if(sqlcipher)
-    add_definitions(-DENABLE_SQLCIPHER)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_SQLCIPHER)
     find_package(SQLCipher REQUIRED)
-    include_directories(SYSTEM "${SQLCIPHER_INCLUDE_DIR}/sqlcipher")
     set(LIBSQLITE_NAME SQLCipher::SQLCipher)
 else()
     find_package(SQLite3 REQUIRED)
@@ -262,7 +315,6 @@ target_sources(${PROJECT_NAME}
 
     # Translations
     src/translations/flags/flags.qrc
-    src/translations/translations.qrc
 
     # Styles
     src/qdarkstyle/dark/darkstyle.qrc
@@ -276,6 +328,28 @@ target_link_libraries(${PROJECT_NAME}
     ${LIBSQLITE_NAME}
     ${PLATFORM_LIBS}
 )
+
+if(SQLITEBROWSER_DEPLOY_RUNTIME)
+    if(NOT sqlcipher)
+        message(FATAL_ERROR
+            "SQLITEBROWSER_DEPLOY_RUNTIME requires the staged SQLCipher build.")
+    endif()
+
+    include(cmake/SQLiteBrowserWindowsRuntime.cmake)
+    sqlitebrowser_configure_windows_runtime(
+        TARGET ${PROJECT_NAME}
+        SQLCIPHER_TARGET SQLCipher::SQLCipher
+    )
+
+    if(ENABLE_TESTING)
+        sqlitebrowser_add_windows_runtime_smoke(
+            APP_TARGET ${PROJECT_NAME}
+            SQLCIPHER_TARGET SQLCipher::SQLCipher
+            SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/runtime_smoke.cpp"
+            TLS_URL "${SQLITEBROWSER_TLS_SMOKE_URL}"
+        )
+    endif()
+endif()
 
 include(config/install.cmake)
 

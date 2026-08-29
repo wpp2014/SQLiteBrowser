@@ -7,3 +7,18 @@ OPTION(FORCE_INTERNAL_QHEXEDIT "Don't use distribution's QHexEdit even if availa
 OPTION(ALL_WARNINGS "Enable some useful warning flags" OFF)
 OPTION(sqlcipher "Build with SQLCipher library" OFF)
 OPTION(customTap "Using SQLCipher, SQLite and Qt installed through our custom Homebrew tap" OFF)
+OPTION(SQLITEBROWSER_DEPLOY_RUNTIME
+    "Deploy and validate the Windows runtime next to the application after linking"
+    ON)
+
+set(SQLITEBROWSER_TLS_SMOKE_URL
+    "https://download.sqlitebrowser.org/currentrelease"
+    CACHE STRING "HTTPS endpoint used by the explicit Windows runtime smoke target")
+
+set(SQLITEBROWSER_DEPENDENCY_SDK_POLICY "WARN" CACHE STRING
+    "Dependency SDK mismatch policy: WARN or STRICT")
+set_property(CACHE SQLITEBROWSER_DEPENDENCY_SDK_POLICY PROPERTY STRINGS WARN STRICT)
+if(NOT SQLITEBROWSER_DEPENDENCY_SDK_POLICY MATCHES "^(WARN|STRICT)$")
+    message(FATAL_ERROR
+        "SQLITEBROWSER_DEPENDENCY_SDK_POLICY must be WARN or STRICT.")
+endif()

@@ -1,5 +1,7 @@
 #include "csvparser.h"
 
+#include <cctype>
+
 #include <QString>
 #include <QTextStream>
 
@@ -75,14 +77,17 @@ inline CSVField* addColumn(CSVRow& r, CSVField* field, bool trim)
     if(trim)
     {
         // Check for trailing spaces and omit them
-        while(field->data_length && isspace(*field->data))
+        while(field->data_length
+              && std::isspace(static_cast<unsigned char>(*field->data)))
         {
             field->data++;
             field->data_length--;
         }
 
         // Check for pending spaces and omit them
-        while(field->data_length && isspace(field->data[field->data_length-1]))
+        while(field->data_length
+              && std::isspace(static_cast<unsigned char>(
+                  field->data[field->data_length-1])))
             field->data_length--;
     }
 

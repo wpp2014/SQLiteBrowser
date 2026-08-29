@@ -1,14 +1,24 @@
-include_directories("${CMAKE_CURRENT_BINARY_DIR}" ..)
-
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(${QT_MAJOR} REQUIRED COMPONENTS Test Widgets)
-if(QT_MAJOR STREQUAL "Qt6")
-    find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
-    set(QT5_COMPAT Qt6::Core5Compat)
-endif()
+function(sqlitebrowser_configure_unit_test target)
+    target_include_directories(${target}
+        PRIVATE
+            "${CMAKE_CURRENT_BINARY_DIR}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    )
+    set_target_properties(${target} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/tests"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/tests"
+    )
+    add_test(NAME ${target} COMMAND $<TARGET_FILE:${target}>)
+    set_tests_properties(${target} PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        TIMEOUT 60
+    )
+endfunction()
 
 # test-sqlobjects
 
@@ -34,8 +44,8 @@ set(TESTSQLOBJECTS_HDR
 )
 
 add_executable(test-sqlobjects ${TESTSQLOBJECTS_HDR} ${TESTSQLOBJECTS_SRC})
-target_link_libraries(test-sqlobjects ${QT_MAJOR}::Test)
-add_test(NAME test-sqlobjects COMMAND $<TARGET_FILE:test-sqlobjects>)
+target_link_libraries(test-sqlobjects PRIVATE Qt6::Test)
+sqlitebrowser_configure_unit_test(test-sqlobjects)
 
 # test-import
 
@@ -49,8 +59,8 @@ set(TESTIMPORT_MOC_HDR
 )
 
 add_executable(test-import ${TESTIMPORT_MOC_HDR} ${TESTIMPORT_SRC})
-target_link_libraries(test-import ${QT_MAJOR}::Test)
-add_test(NAME test-import COMMAND $<TARGET_FILE:test-import>)
+target_link_libraries(test-import PRIVATE Qt6::Test)
+sqlitebrowser_configure_unit_test(test-import)
 
 # test regex
 
@@ -65,8 +75,8 @@ set(TESTREGEX_HDR
 )
 
 add_executable(test-regex ${TESTREGEX_HDR} ${TESTREGEX_SRC})
-target_link_libraries(test-regex ${QT_MAJOR}::Test ${QT_MAJOR}::Widgets ${QT5_COMPAT})
-add_test(NAME test-regex COMMAND $<TARGET_FILE:test-regex>)
+target_link_libraries(test-regex PRIVATE Qt6::Test Qt6::Widgets Qt6::Core5Compat)
+sqlitebrowser_configure_unit_test(test-regex)
 
 # test cache
 
@@ -79,5 +89,5 @@ set(TESTCACHE_HDR
 )
 
 add_executable(test-cache ${TESTCACHE_HDR} ${TESTCACHE_SRC})
-target_link_libraries(test-cache ${QT_MAJOR}::Test)
-add_test(NAME test-cache COMMAND $<TARGET_FILE:test-cache>)
+target_link_libraries(test-cache PRIVATE Qt6::Test)
+sqlitebrowser_configure_unit_test(test-cache)

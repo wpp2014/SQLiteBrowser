@@ -1,312 +1,357 @@
-# 从上游 master 开展 v4.0.0 升级的风险分析
+# 当前分支主程序构建升级风险分析
 
-> 文档性质：升级基线与分支风险分析  
-> 分析日期：2026-08-23  
-> 稳定版本：`v3.13.1`  
-> 升级分支：`upgrade/v4.0.0`  
-> 当前基线：`1debae535a418b66267db56739a9bc0c9b4ac37b`  
-> 本文仅记录分析结论，不代表已经修改构建系统、依赖或版本号。
+> 文档性质：当前分支构建迁移风险与控制措施
+> 最后更新：2026-08-28
+> 当前分支：`upgrade/v4.0.0`
+> 当前基线：`1a6e345c37403f7fa20d2e029be5abd5fdfa9b8b`
+> 目标：Windows x64、VS2022/v143、SDK `10.0.26100.0`、Qt 6.11.1、配置专用共享依赖
+> 本阶段直接以当前分支为唯一代码基线，不比较、合并或回退到上游稳定标签。
+> 本轮只更新文档，没有修改工程。
 
 ## 1. 结论
 
-从当前上游 `master` 创建 `upgrade/v4.0.0` 是合理的，适合作为下一主版本的开发基线，不建议切回 `v3.13.1`，也不建议把 `v3.13.1` 整体 merge 到升级分支。
+依赖构建阶段已经形成稳定的 Debug/Release stage，主程序可以开始迁移。但整体风险仍为中高，主要集中在主工程 CMake 和运行时部署，而不是依赖源码本身。
 
-但当前整体风险为 **中高**。主要原因不是分支创建方式错误，而是：
+优先级最高的风险是：
 
-- `master` 不是 `v3.13.1` 的线性后继。
-- `master` 包含大量尚未进入稳定版本的功能、构建和依赖变化。
-- 后续还计划同时迁移到 VS2022、Windows SDK `10.0.22621.0` 并创建 `4.0.0`，容易把不同来源的问题混在一起。
+1. 现有依赖由 SDK 22621 构建，而主程序目标改为 SDK 26100。
+2. 当前 SQLCipher finder 不能正确表达 Windows DLL/import library。
+3. 现有 install 规则不能保证普通 build 输出直接运行。
+4. Qt 路径、系统 OpenSSL 和同名 DLL 仍可能被开发机环境偶然找到。
+5. `windeployqt` 只处理 Qt 运行时，不能替代 SQLCipher/OpenSSL/Brotli 的显式部署。
+6. 历史 Windows subsystem/entry flags 可能与 VS2022/Qt6 行为冲突。
 
-正确策略是固定当前 master 提交作为可追踪基线，先验证未修改基线，再逐层迁移工具链、打包和依赖。
+建议先完成 Preset、严格 finder 和 build-time deploy，再进入 CI、安装器和版本号工作。
 
-## 2. 分支与 tag 拓扑
+## 2. 基线边界
 
-当前关系为：
-
-- `upgrade/v4.0.0`：`1debae53`
-- `master`：`1debae53`
-- `origin/master`：`1debae53`
-- `upstream/master`：`1debae53`
-- `v3.13.1` 最终指向发布提交：`5d84f53f`
-- `v3.13.1` 与当前 master 的共同祖先：`b952e52e`
-
-`upgrade/v4.0.0` 与 master 之间互相领先的提交数都是 0，因此升级分支确实是直接从当前 master 创建的，没有夹带额外代码提交。
-
-但是 `v3.13.1` 不是 master 的祖先。其拓扑可以简化为：
+本阶段只接受：
 
 ```text
-                         66 commits
-                       /------------ v3.13.1 (5d84f53f)
-b952e52e -------------+
-                       \------------ master / upgrade/v4.0.0 (1debae53)
-                         252 commits
+branch: upgrade/v4.0.0
+baseline: 1a6e345c37403f7fa20d2e029be5abd5fdfa9b8b
 ```
 
-这表示上游采用了稳定分支与开发分支并行、部分修改以 cherry-pick 或重新实现方式同步的历史模式。不能把当前 master 简单理解为“`v3.13.1` 加上 252 个提交”。
+后续实现期间不应无计划同步其他分支。若必须同步，应单独提交并在同步后重新验证：
 
-## 3. 稳定分支补丁审计
+- 两个 configure preset；
+- 两个 build preset；
+- 两个 test preset；
+- Debug/Release 依赖 manifest；
+- 应用可运行目录；
+- 干净机 Release 启动。
 
-对 `v3.13.1` 相对 master 的 66 个稳定分支提交进行补丁等价性检查后：
+## 3. 工具链风险
 
-- 46 个提交可以在 master 中找到 patch-equivalent 实现。
-- 20 个提交没有被 Git 识别为完全相同的补丁。
-
-剩余 20 个提交主要分为：
-
-| 类型 | 数量 | 说明 |
-| --- | ---: | --- |
-| RC/稳定版版本准备 | 7 | 设置 3.13.0/3.13.1 版本及发布准备，不应直接带回开发分支 |
-| CI、构建及非 Windows 平台 | 6 | 包括 Ubuntu、AppImage、OpenBSD 和旧发布流程调整 |
-| 翻译更新 | 4 | 发布前翻译同步 |
-| 功能修复 | 2 | 表浏览设置清理、项目加载相关修复 |
-| 链接/文本更新 | 1 | HTTP 链接替换为 HTTPS |
-
-Git 没有判定补丁等价，并不必然表示 master 缺少该功能。进一步检查发现，关键修改在 master 上有不同哈希的对应提交：
-
-| 稳定分支提交 | master 对应提交 | 内容 |
-| --- | --- | --- |
-| `aeda1b4c` | `fdc4169f` | 清理已不存在表的 Table Browser 设置 |
-| `2b15d376` | `123a993b` | 项目加载问题 `#2567` |
-| `ea4c59b0` | `84975d9a` | PR 构建不运行部署步骤 |
-| `343bc1ad` | `9832a52d` | HTTP 链接替换为 HTTPS |
-
-因此目前没有证据表明 master 大量遗漏了 `v3.13.1` 的关键修复。风险来自历史不线性和补丁上下文变化，而不是已经确认的功能缺失。
-
-仍建议在正式升级前把这 20 个提交形成一份明确审计清单，逐项标记：
-
-- 已在 master 等价实现；
-- 仅用于旧稳定版发布，无需迁移；
-- 与仅支持 Windows 的目标无关；
-- 需要人工移植或重新验证。
-
-## 4. 不应直接 merge v3.13.1
-
-不建议在 `upgrade/v4.0.0` 上执行：
-
-```text
-git merge v3.13.1
-```
-
-主要风险为：
-
-1. 46 个已等价存在的补丁可能再次进入历史或产生冲突。
-2. 稳定分支的版本准备提交会把 `3.13.1` 设置带回当前 `3.13.99` 开发树。
-3. CMake、CI、安装器、翻译和 UI 已在 master 上继续演化，合并冲突范围很大。
-4. `v3.13.1` 的 `CHANGELOG.md` 中实际保留了 `<<<<<<<`、`=======`、`>>>>>>>` 三个 Git 冲突标记，而当前 master 不存在该问题。
-5. 即便合并成功，也很难证明最终选择的冲突解决方案等同于稳定版加开发版的正确组合。
-
-如果后续发现某个稳定修复确实缺失，应只移植必要补丁，并针对当前 master 重新测试。
-
-## 5. master 与 v3.13.1 的变化规模
-
-以两个版本当前文件内容直接比较：
-
-- 529 个文件发生变化。
-- 约 86,244 行新增。
-- 约 19,183 行删除。
-
-部分增量来自 QScintilla 目录重组和第三方源码升级，不能把全部行数都视为应用业务变化，但它仍说明当前 master 已经不是对稳定版的小幅修补。
-
-主要变化包括：
-
-- 大幅重构顶层 CMake，将平台、选项、第三方库、安装和翻译逻辑拆分到 `config/*.cmake`。
-- 增加 Qt6 支持，同时保留 Qt5 默认路径。
-- QScintilla 调整为仓库内 `2.14.1` 版本及新目录结构。
-- 重构 GitHub Actions 构建和发布流程。
-- 增加 Windows ARM64 构建和独立安装器。
-- 修改 SQLite、SQLCipher、SQLean 和 OpenSSL 的 Windows 构建方式。
-- 移除 dbhub.io 相关远程数据库代码和证书。
-- 修改多个主窗口、表浏览、绘图、设置、项目文件和 SQL 执行功能。
-
-因此从 master 开始升级意味着会同时继承全部未发布开发变化及其潜在回归。
-
-## 6. 风险清单
-
-### 6.1 未发布 master 基线风险
+### 3.1 SDK 混用
 
 **等级：高**
 
-当前 master 使用开发版本号 `3.13.99`，不是一个已经正式验收的稳定版本。若直接迁移 VS2022 后出现问题，将难以判断问题来自：
+现有所有依赖 manifest 都记录 SDK `10.0.22621.0`，目标主程序为 `10.0.26100.0`。
 
-- master 原有回归；
-- VS2019 到 VS2022 的编译器变化；
-- v142 到 v143 的运行库变化；
-- SDK 19041 到 22621 的变化；
-- Qt、OpenSSL、SQLite、SQLCipher 等依赖；
-- WiX、签名或 MSI 打包；
-- 版本号和升级逻辑。
+可能影响：
 
-在修改工具链前，必须先建立当前提交的未修改 Windows 构建基线。
+- 构建结果不再来自同一套 headers/import libraries；
+- 发生 Windows API 或宏差异时难以归因；
+- CI 与本地产物的供应链声明不一致；
+- 严格 manifest gate 无法通过。
 
-### 6.2 非线性历史与发行说明风险
+控制措施：
+
+- bring-up 可临时允许 26100 应用消费 22621 依赖；
+- 配置日志必须显示该差异；
+- 发布前用 26100 重建全部依赖；
+- 最终 configure 对 SDK manifest 不一致直接失败。
+
+### 3.2 Visual Studio 多配置误用
+
+**等级：中高**
+
+Visual Studio generator 默认一个 build tree 包含多个配置。若 Debug/Release 共用 cache，就可能把 Debug 应用链接到 Release SQLCipher/OpenSSL。
+
+控制措施：
+
+- 使用 `build/x64-shared-debug` 和 `build/x64-shared-release` 两个独立 tree；
+- 每个 configure preset 限制 `CMAKE_CONFIGURATION_TYPES`；
+- finder 只接受当前配置 stage；
+- build/test preset 显式填写 `configuration`；
+- manifest 校验 CRT。
+
+### 3.3 历史 linker flags
+
+**等级：中高**
+
+当前 Release 强制 `/SUBSYSTEM:WINDOWS,5.02 /ENTRY:mainCRTStartup`。它绕开现代 CMake/Qt 对 Windows GUI target 的默认处理，也不能代表 Qt6 的真实最低系统要求。
+
+控制措施：
+
+- 删除历史 subsystem version 和手写 entry point；
+- 保留 `WIN32_EXECUTABLE`；
+- 分别验证 Debug 控制台与 Release GUI；
+- 用产品策略单独确定最低 Windows 版本。
+
+## 4. Qt 风险
+
+### 4.1 路径硬编码
 
 **等级：高**
 
-以下命令不能单独作为 4.0.0 发行说明来源：
+把开发机 Qt 绝对路径提交到版本化 Preset 会让其他开发者和 CI 立即失效。
 
-```text
-git log v3.13.1..upgrade/v4.0.0
-```
+控制措施：
 
-它不能正确表达稳定分支与 master 之间的 cherry-pick、重复实现和分叉提交。发行说明需要结合：
+- 只提交带占位符的 `CMakePresets.template.json`；
+- 开发者复制出被忽略的本地 `CMakePresets.json` 并填写 Qt 根目录；
+- 复制模板，不移动被 Git 跟踪的模板；
+- configure 验证 Qt 版本、架构、Core5Compat 和 windeployqt；
+- 不从全局 PATH 猜测 Qt。
 
-- `v3.13.1...master` 对称差异；
-- patch-equivalent 审计；
-- 最终文件内容差异；
-- 用户可见功能的人工分类。
-
-### 6.3 多类升级同时发生的归因风险
+### 4.2 Qt runtime 不完整
 
 **等级：高**
 
-若在同一批修改中同时完成 VS2022、SDK、Qt、SQLite、SQLCipher、WiX 和 `4.0.0` 版本切换，构建错误、运行时崩溃和安装器错误会互相重叠。
+只复制 `Qt6Core.dll` 等顶层 DLL 不足以运行 GUI。缺少 `platforms/qwindows.dll`、TLS、imageformats 或其他 plugin 时，应用可能启动失败或部分功能静默不可用。
 
-需要把工具链迁移、依赖升级、打包升级和版本发布拆成独立阶段，每阶段都保留可验证状态。
+控制措施：
 
-### 6.4 上游持续变化风险
+- 使用当前 Qt package 提供的 `Qt6::windeployqt`；
+- Debug/Release 传入正确模式；
+- 部署 compiler runtime；
+- 对最终目录运行 Qt plugin 和 TLS smoke test；
+- 不维护手写 Qt DLL 清单。
 
-**等级：中高**
+### 4.3 Debug 可分发性
 
-上游 master 仍在更新。如果升级期间频繁 rebase 或 merge 上游：
+**等级：中**
 
-- 基准会持续变化；
-- CMake 和 CI 冲突概率升高；
-- 测试结果难以复现；
-- 4.0.0 的范围会持续膨胀。
+Debug Qt、SQLCipher 和 OpenSSL 使用 Debug CRT。Microsoft Debug CRT 不属于普通 redistributable。
 
-建议先冻结基线：
+控制措施：
 
-```text
-1debae535a418b66267db56739a9bc0c9b4ac37b
+- Debug 只承诺在安装 VS2022 的开发机直接运行；
+- portable ZIP、CI 发布物和安装器只消费 Release；
+- Release 审计不得出现 Debug CRT。
+
+## 5. SQLCipher 与 OpenSSL 风险
+
+### 5.1 SQLCipher imported target 错误
+
+**等级：高**
+
+当前 finder 把 `sqlcipher.lib` 作为 `IMPORTED_LOCATION`，没有声明 DLL。链接可能成功，但 CMake 无法从 target 可靠取得 runtime 文件。
+
+控制措施：
+
+- `IMPORTED_IMPLIB` 指向 LIB；
+- `IMPORTED_LOCATION` 指向 DLL；
+- include 指向配置专用 stage；
+- finder 同时验证 manifest；
+- deploy 通过 target 或明确 stage 获取 DLL。
+
+### 5.2 系统 OpenSSL 被误用
+
+**等级：高**
+
+普通 `find_package(OpenSSL)`、PATH 或 `find_file()` 可能选中系统安装的其他 OpenSSL。
+
+控制措施：
+
+- Windows 使用项目 stage 的 OpenSSL config package；
+- preset 显式设置配置专用 `OpenSSL_DIR`；
+- 禁止系统回退；
+- 运行时从最终 EXE 目录加载 DLL；
+- 用 `dumpbin` 和进程模块列表验证来源。
+
+### 5.3 Brotli 是动态隐藏依赖
+
+**等级：高**
+
+OpenSSL 以动态方式加载 Brotli，导入表不一定列出 Brotli DLL。仅根据 `dumpbin /dependents libcrypto` 复制文件会漏部署。
+
+控制措施：
+
+- 从匹配 OpenSSL stage 复制三个 Brotli DLL；
+- 把 OpenSSL manifest 的 Brotli tag/commit 作为部署契约；
+- 增加运行时 Brotli integration probe；
+- 禁止混用独立 Brotli stage 的另一配置。
+
+### 5.4 不相关 DLL 过度部署
+
+**等级：中**
+
+zlib 和 zstd 已经构建，但目前没有进入主程序的实际链接闭包。无条件复制会扩大攻击面、许可证清单和版本维护范围。
+
+控制措施：
+
+- 只部署真实 runtime closure；
+- 新增链接后再加入对应 DLL 和许可证；
+- 以 imported target、dumpbin 和运行时模块审计为依据。
+
+## 6. Preset 风险
+
+### 6.1 误解 cmake --preset
+
+**等级：中**
+
+`cmake --preset debug` 只 configure。如果文档把它描述成完整构建，开发者会误以为没有生成 EXE 是故障。
+
+控制措施：
+
+```cmd
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
 ```
 
-完成第一轮 VS2022 + SDK 22621 构建闭环后，再安排一次受控的上游同步。
+Release 同理。需要单命令时使用 workflow preset。
 
-### 6.5 仅支持 Windows 的维护风险
-
-**等级：中**
-
-上游仍是跨平台项目。如果为了“仅支持 Windows”立即删除 Linux/macOS 代码和 CMake 分支，未来同步上游的冲突会显著增加。
-
-建议第一阶段只限制 fork 的 CI、发布物和支持声明，不急于删除跨平台源码。等 Windows 版本稳定且确认不再跟进上游后，再决定是否清理其他平台代码。
-
-### 6.6 依赖不可重复风险
+### 6.2 “shared”命名歧义
 
 **等级：中高**
 
-当前 Windows CI 中：
+看到 `x64-shared-*` 后直接设置 `BUILD_SHARED_LIBS=ON`，会把内置 QScintilla、QCustomPlot、QHexEdit 变成 DLL；当前 wrapper 没有完整验证这些库的 Windows 导出宏和部署。
 
-- SQLite 在构建时解析并下载官网最新版本。
-- SQLean x64 下载当时最新 release。
-- 部分工具和 Action 会持续升级。
-- WiX 与 VC Runtime 路径依赖 runner 环境。
+控制措施：
 
-同一个 Git 提交在不同日期可能产生不同二进制。迁移前应固定依赖版本和校验值，否则无法准确比较 VS2019 与 VS2022 产物。
+- 第一阶段固定 `BUILD_SHARED_LIBS=OFF`；
+- “shared”只表示外部 Qt/SQLCipher/OpenSSL/Brotli 运行时；
+- 若未来需要内部库 DLL 化，单独实现导出宏、ABI 和部署测试。
 
-### 6.7 用户数据与行为兼容风险
-
-**等级：中高**
-
-master 已修改项目文件加载、设置、表浏览、SQL 执行和远程功能。即使 SQLite 数据库文件格式本身保持兼容，应用行为也可能变化。
-
-4.0.0 验证至少应覆盖：
-
-- 打开由 v3.13.1 创建的数据库。
-- 打开和保存旧项目文件。
-- 读取并迁移旧用户设置。
-- 最近文件、只读模式、SQL 标签页和表浏览设置。
-- SQLite 与 SQLCipher 数据库。
-- dbhub.io 功能移除后的 UI、设置和旧项目兼容表现。
-
-### 6.8 版本语义风险
+### 6.3 Qt 占位符未替换
 
 **等级：中**
 
-如果变更只包含 VS2022、Windows SDK 和依赖升级，直接使用 `4.0.0` 可能无法体现真正的破坏性变化。
+开发者若直接复制模板但没有替换 Qt 占位符，配置可能表现为找不到 Qt；若另外存在系统 Qt，也可能意外找到错误版本。
 
-如果 4.0.0 同时代表以下决策，则主版本升级更合理：
+控制措施：
 
-- 提高最低 Windows 版本；
-- 停止发布 x86；
-- Qt5 迁移到 Qt6；
-- 移除旧功能；
-- 改变设置或项目文件兼容规则；
-- 改变 MSI 升级或安装范围。
+- configure 开始即验证 `CMAKE_PREFIX_PATH` 不是模板占位符；
+- 错误信息给出复制模板和填写路径的方法；
+- 不允许静默 fallback；
+- CI 生成自己的本地 `CMakePresets.json`，不修改已提交模板。
 
-需要在修改版本号之前明确 4.0.0 的兼容性承诺。
+## 7. 输出与部署风险
 
-### 6.9 CI 触发风险
+### 7.1 install 与 build 输出不一致
+
+**等级：高**
+
+当前 DLL 部署只在 install 阶段执行。用户要求 build 后 EXE 目录即可运行，因此只修正 install 规则不足以达成目标。
+
+控制措施：
+
+- 新增 build-time deploy target；
+- build preset 构建该 target；
+- build/install 共用 runtime 来源；
+- 两种输出都进行依赖审计。
+
+### 7.2 find_file 找到错误 DLL
+
+**等级：高**
+
+现有 `find_file()` 使用通用 suffix 搜索，可能从 PATH、旧构建或系统安装中取得同名 DLL。
+
+控制措施：
+
+- 不再全局搜索 runtime；
+- 使用 `SQLCipher::SQLCipher`、`OpenSSL::Crypto`、`OpenSSL::SSL` 的 imported location；
+- Brotli 从已验证 OpenSSL stage 复制；
+- configure 输出每个源文件的绝对路径。
+
+### 7.3 PATH 掩盖缺失文件
+
+**等级：高**
+
+开发机 PATH 中的 Qt/OpenSSL DLL 可能让不完整目录看似可运行。
+
+控制措施：
+
+- 用最小环境或干净虚拟机启动 Release；
+- 临时清空开发依赖 PATH；
+- 记录实际加载模块路径；
+- 将“整个目录复制到另一台机器可启动”设为完成条件。
+
+## 8. 工程范围风险
+
+### 8.1 .gitignore 忽略新 CMake 文件
 
 **等级：中**
 
-当前总 CI 的 push 触发器只监听 `master`。普通推送 `upgrade/v4.0.0` 不会自动运行完整 CI，只能通过 Pull Request 或手动 `workflow_dispatch` 触发。
+仓库当前全局忽略 `*.cmake`。新增部署 helper 时可能不会出现在 `git status`，导致本地能构建但提交缺文件。
 
-如果不调整触发条件，升级分支可能在缺少持续验证的情况下积累修改。
+控制措施：
 
-### 6.10 发布与签名风险
+- 优先修改已有 tracked CMake 文件；
+- 如需新增 helper，同步增加精确 whitelist；
+- 提交前使用 `git status --ignored` 检查。
 
-**等级：中高**
+### 8.2 构建、部署、安装器同时修改
 
-fork 可能没有上游使用的 SignPath secrets。即使编译成功，MSI 签名和正式发布步骤仍可能失败。
+**等级：高**
 
-此外，当前发布流程主要生成 `continuous` 和 `nightly` prerelease，并没有完整表达稳定版 `v4.0.0` 的发布流程。需要单独验证：
+Preset、finder、windeployqt、NSIS、版本号同时变化会导致错误难以归因。
 
-- 正式签名策略；
-- MSI ProductVersion、UpgradeCode 和升级检测；
-- 从 v3.13.1 升级到 v4.0.0；
-- ZIP 文件名和 GitHub Release tag；
-- Winget 更新流程。
+控制措施：
 
-## 7. 建议的实施边界
+1. Preset 与 finder；
+2. 主程序编译和 CTest；
+3. build-time deploy；
+4. SDK 统一；
+5. CI；
+6. install/portable ZIP/NSIS；
+7. 版本号。
 
-建议保留当前 `upgrade/v4.0.0` 分支，并执行以下顺序：
+每阶段独立提交和验证。
 
-1. 固定 `1debae53` 为上游基线，不继续无计划地同步 master。
-2. 完成 20 个非 patch-equivalent 稳定提交的人工审计记录。
-3. 使用当前官方 Windows 工具链构建未修改的 `1debae53`。
-4. 保存编译日志、CTest、MSI、ZIP、依赖版本和启动结果。
-5. 只迁移到 VS2022/v143 和 SDK `10.0.22621.0`，暂不升级其他依赖。
-6. 修正 WiX 中的 VS2019/VC142 运行库假设。
-7. 固定 SQLite、SQLean、Qt、OpenSSL 和 SQLCipher 版本。
-8. 再逐项升级第三方依赖，每项单独构建和测试。
-9. 补充旧数据库、旧项目、旧设置和 MSI 升级测试。
-10. 最后统一版本来源并设置 `4.0.0`。
-11. 发布候选版本，验证后再创建稳定 tag/release。
+## 9. 实施门禁
 
-## 8. 阶段性准入条件
+### 开始编码前
 
-### 开始 VS2022 迁移前
+- 三份分析文档与当前目标一致；
+- Qt 路径输入方式确定；
+- Debug/Release stage 路径确定；
+- 接受 bring-up 阶段 SDK 混用，或先决定重建依赖；
+- 应用输出名是否保持 SQLCipher 品牌已知但不在本阶段修改。
 
-- 当前 master 基线能使用原工具链成功构建。
-- SQLite 与 SQLCipher 两套 CTest 结果已保存。
-- 外部依赖实际版本已记录。
-- 已确认目标架构是 x64、x86、ARM64 中的哪些组合。
+### Preset 完成
 
-### 设置 4.0.0 版本号前
+- configure 精确报告 VS2022、x64、v143、SDK 26100；
+- Qt 精确为用户指定的 6.11.1；
+- Debug/Release cache 和依赖不混用；
+- 系统 OpenSSL/SQLCipher 不参与。
 
-- VS2022 + SDK `10.0.22621.0` 构建稳定。
-- MSI 和 ZIP 能正常运行。
-- VC143 Runtime 部署正确。
-- 旧版本升级测试通过。
-- 版本号已经集中为单一来源。
-- 4.0.0 的兼容性和功能范围已经冻结。
+### Build 完成
 
-### 创建稳定发布前
+- 两个 build preset 成功；
+- 四个 CTest 成功；
+- 主程序、SQLCipher、OpenSSL 架构和 CRT 正确；
+- 历史 linker flags 已处理。
 
-- 不再使用浮动的 SQLite/SQLean 最新版本。
-- Release 构建可重复。
-- 签名链路可用。
-- 稳定版 tag、Release、文件名和 Winget 版本一致。
-- 已完成候选版本验证和回归测试。
+### Deploy 完成
 
-## 9. 最终建议
+- 两个 `bin` 目录形成；
+- Debug 可在开发机运行；
+- Release 可在干净 Windows 环境运行；
+- Qt TLS、普通数据库、加密数据库 smoke test 通过；
+- 没有从 PATH 加载依赖。
 
-保留当前从 master 创建的 `upgrade/v4.0.0`，不要回退到 `v3.13.1`，也不要整体合并稳定 tag。
+### Release 准入
 
-当前最优先的工作不是修改 `4.0.0` 版本号，而是：
+- 全部依赖重新使用 SDK 26100；
+- manifest 严格一致；
+- Release 不包含 Debug CRT；
+- portable/installer、许可证、签名和升级测试另行完成。
 
-1. 固定并验证 `1debae53` 未修改基线；
-2. 完成稳定分支剩余补丁审计；
-3. 把 VS2022 + SDK `10.0.22621.0` 作为独立迁移阶段。
+## 10. 最终建议
 
-只要保持上述隔离，直接从 master 开展 4.0.0 升级的风险是可控的。
+以当前分支为唯一基线，下一次工程修改只处理：
+
+1. `CMakePresets.template.json` 与本地 `CMakePresets.json` 工作流；
+2. Qt 用户路径输入与验证；
+3. SQLCipher/OpenSSL 严格 finder；
+4. Windows linker flags；
+5. 配置专用 runtime output；
+6. build-time DLL/Qt deployment；
+7. Debug/Release build 与 CTest。
+
+不要在同一阶段引入版本号、NSIS、功能重构或内部 Qt 库 DLL 化。这样可以把问题限定在构建图与部署闭包内，并为后续统一 SDK 和正式发布保留清晰边界。

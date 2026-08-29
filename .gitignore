@@ -5,7 +5,13 @@ CMakeLists.txt.user
 CMakeFiles
 *.cmake
 !third_party/sqlcipher/cmake/BuildSQLCipher.cmake
+!cmake/SQLiteBrowserWindowsRuntime.cmake
+!cmake/RunSQLiteBrowserWindowsSmoke.cmake
 *.cxx_parameters
+
+# Local CMake presets may contain developer-specific absolute paths.
+/CMakePresets.json
+/CMakeUserPresets.json
 
 # ignore any build folders
 build*/

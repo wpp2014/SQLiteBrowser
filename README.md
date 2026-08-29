@@ -41,6 +41,7 @@
   - [Nix Packages](#nix-packages)
     - [Flox](#flox)
   - [Compiling](#compiling)
+    - [Windows v4 branch](#windows-v4-branch)
   - [X (Known as Twitter)](#x-known-as-twitter)
   - [Website](#website)
   - [Old project page](#old-project-page)
@@ -292,8 +293,221 @@ Or with the `nix-env` or `nix-shell` commands:
 
 ## Compiling
 
-Instructions for compiling on Windows, macOS, Linux, and FreeBSD are
-in [BUILDING](BUILDING.md).
+The `upgrade/v4.0.0` branch currently supports Windows x64 only. It uses
+Visual Studio 2022, Qt 6.11.1, the repository-pinned dependency sources, and
+CMake Presets. The older cross-platform instructions in [BUILDING](BUILDING.md)
+do not describe this branch.
+
+### Windows v4 branch
+
+The following procedure starts with a fresh clone and produces independently
+configured Debug and Release application directories. Run all commands from
+the repository root in a regular `cmd.exe` window. The dependency scripts
+locate and initialise Visual Studio themselves, so a Developer Command Prompt
+is not required.
+
+#### 1. Install the build tools
+
+| Component | Required configuration |
+| --- | --- |
+| Visual Studio | Visual Studio 2022 Enterprise, Professional, or Community, installed in its default `C:\Program Files\Microsoft Visual Studio\2022\<Edition>` directory |
+| Visual Studio workload | **Desktop development with C++**, including MSVC v143 x64/x86 build tools and MSBuild |
+| Windows SDKs | Both **10.0.22621.0** and **10.0.26100.0** |
+| Git | Available as `git.exe` in `PATH` |
+| CMake | Version **3.30.3**, with `cmake.exe` and `ctest.exe` in `PATH` |
+| Qt | Qt **6.11.1**, MSVC 2022 64-bit package (`msvc2022_64`), including Core5Compat, LinguistTools, SVG, and PDF support |
+| Perl | A native Windows Perl distribution, preferably Strawberry Perl, with `perl.exe` in `PATH` |
+| NASM | Available as `nasm.exe` in `PATH` |
+
+The dependency scripts currently build Brotli, OpenSSL, and SQLCipher with
+Windows SDK 10.0.22621.0. The application targets Windows SDK 10.0.26100.0.
+The configure step reports this difference as an expected warning on this
+bring-up branch.
+
+NSIS is not required to compile or run the application. It will be needed
+later for installer packaging.
+
+You can check the command-line tools before cloning:
+
+~~~cmd
+git --version
+cmake --version
+ctest --version
+perl --version
+nasm -v
+~~~
+
+#### 2. Clone the repository and initialise submodules
+
+~~~cmd
+git clone --branch upgrade/v4.0.0 --recurse-submodules https://github.com/wpp2014/SQLiteBrowser.git
+cd SQLiteBrowser
+git submodule update --init --recursive
+~~~
+
+The final `git submodule update` is intentionally safe to repeat and ensures
+all nested submodules are present at the commits recorded by this repository.
+
+The main application currently consumes these pinned dependencies:
+
+| Dependency | Version | Required by the main application |
+| --- | --- | --- |
+| Brotli | v1.2.0 | Yes, dynamically loaded by OpenSSL |
+| OpenSSL | openssl-3.5.7 | Yes |
+| SQLCipher | v4.18.0 | Yes |
+| zlib | v1.3.2 | No |
+| zstd | v1.5.7 | No |
+
+#### 3. Build the required dependency stages
+
+Build the dependencies in this order:
+
+~~~cmd
+third_party\brotli\build.cmd all
+third_party\openssl\build.cmd all safe
+third_party\sqlcipher\build.cmd all
+~~~
+
+`safe` runs the OpenSSL test suite while excluding `test_bio_dgram`, which can
+conflict with local IPv6 UDP filters. Use `full` only on a machine where the
+script's IPv6 UDP preflight succeeds. Do not use `none` for a normal first
+build.
+
+Each script validates the source revision, Visual Studio installation, SDK,
+architecture, CRT, staged files, and build manifest. A non-zero exit code means
+the dependency stage must not be used.
+
+Successful builds create:
+
+~~~text
+build\brotli\x64-debug\stage
+build\brotli\x64-release\stage
+build\openssl\x64-debug\stage
+build\openssl\x64-release\stage
+build\sqlcipher\x64-debug\stage
+build\sqlcipher\x64-release\stage
+~~~
+
+To inspect the available modes without building:
+
+~~~cmd
+third_party\brotli\build.cmd --help
+third_party\openssl\build.cmd --help
+third_party\sqlcipher\build.cmd --help
+~~~
+
+#### 4. Create the local CMake Preset file
+
+Copy the repository template. Do not edit the template itself:
+
+~~~cmd
+copy /Y CMakePresets.template.json CMakePresets.json
+~~~
+
+Open `CMakePresets.json` and replace this single placeholder:
+
+~~~text
+REPLACE_WITH_QT_6_11_1_MSVC2022_X64_ROOT
+~~~
+
+with the root of your local Qt 6.11.1 MSVC 2022 x64 package. Use forward
+slashes in JSON, for example:
+
+~~~json
+"CMAKE_PREFIX_PATH": "D:/Qt/6.11.1/msvc2022_64"
+~~~
+
+Do not change the configuration-specific OpenSSL or SQLCipher stage paths.
+`CMakePresets.json` is intentionally ignored by Git because it contains a
+developer-specific Qt path.
+
+Confirm that CMake can read the local file:
+
+~~~cmd
+cmake --list-presets
+~~~
+
+The output must include the `debug` and `release` configure presets.
+
+#### 5. Configure and build the application
+
+Debug:
+
+~~~cmd
+cmake --preset debug
+cmake --build --preset debug
+~~~
+
+Release:
+
+~~~cmd
+cmake --preset release
+cmake --build --preset release
+~~~
+
+The build runs the application's `POST_BUILD` deployment automatically. It
+copies the matching SQLCipher, OpenSSL, and Brotli DLLs, runs `windeployqt`,
+and fails if required runtime files are missing or Debug and Release files are
+mixed.
+
+The runnable output directories are:
+
+~~~text
+build\x64-shared-debug\bin
+build\x64-shared-release\bin
+~~~
+
+Run the application directly:
+
+~~~cmd
+"build\x64-shared-debug\bin\DB Browser for SQLCipher.exe"
+"build\x64-shared-release\bin\DB Browser for SQLCipher.exe"
+~~~
+
+No Qt, OpenSSL, or SQLCipher directory needs to be added to the global `PATH`.
+
+#### 6. Run the tests
+
+Run the four deterministic unit tests:
+
+~~~cmd
+ctest --preset debug
+ctest --preset release
+~~~
+
+Run the complete deployed-runtime smoke suite:
+
+~~~cmd
+cmake --build --preset debug --target sqlitebrowser_runtime_smoke
+cmake --build --preset release --target sqlitebrowser_runtime_smoke
+~~~
+
+The runtime smoke target restricts `PATH` to the deployed application
+directory and verifies application startup, plain SQLite, encrypted SQLCipher,
+OpenSSL dynamic Brotli support, Qt's OpenSSL 3.5.7 backend, HTTPS, and the
+actual loaded DLL locations. The HTTPS check requires network access to
+`https://download.sqlitebrowser.org/currentrelease`; its endpoint can be
+overridden with the `SQLITEBROWSER_TLS_SMOKE_URL` CMake cache variable.
+
+#### 7. Common build failures
+
+| Symptom | Check |
+| --- | --- |
+| A submodule source file is missing | Run `git submodule update --init --recursive` from the repository root |
+| Visual Studio is not found | Use a supported 2022 edition installed in its default directory and install the Desktop C++ workload |
+| Windows SDK selection fails | Install both SDK 10.0.22621.0 and 10.0.26100.0 through Visual Studio Installer |
+| Perl or NASM is not found | Add the native Windows tools to `PATH`, then open a new `cmd.exe` |
+| CMake cannot find Qt | Check that only `CMAKE_PREFIX_PATH` in the local `CMakePresets.json` points to Qt 6.11.1 `msvc2022_64` |
+| OpenSSL full tests report an IPv6 UDP conflict | Rebuild with the documented `safe` test mode |
+| SQLCipher configure rejects OpenSSL | Rebuild Brotli, then OpenSSL, then SQLCipher in that order and do not mix Debug and Release stages |
+| The application reports a missing Qt plugin or DLL | Re-run `cmake --build --preset <debug-or-release>` so the `POST_BUILD` deployment and validation run again |
+
+For implementation details and dependency-specific diagnostics, see:
+
+- [Main application CMake migration plan](docs/upgrade/v4.0.0/main-application-cmake-migration-plan.md)
+- [Brotli VS2022 build analysis](docs/upgrade/v4.0.0/brotli-vs2022-build-analysis.md)
+- [OpenSSL build automation guide](docs/upgrade/v4.0.0/openssl-build-automation-guide.md)
+- [SQLCipher build automation guide](docs/upgrade/v4.0.0/sqlcipher-build-automation-guide.md)
 
 ## X (Known as Twitter)
 

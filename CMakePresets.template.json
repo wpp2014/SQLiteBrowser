@@ -1,0 +1,104 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 30,
+    "patch": 3
+  },
+  "configurePresets": [
+    {
+      "name": "windows-x64-base",
+      "hidden": true,
+      "displayName": "Windows x64 base",
+      "description": "Visual Studio 2022, MSVC v143, Windows SDK 10.0.26100.0 and Qt 6.11.1",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "set"
+      },
+      "toolset": {
+        "value": "v143",
+        "strategy": "set"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_VERSION": "10.0.26100.0",
+        "CMAKE_PREFIX_PATH": "REPLACE_WITH_QT_6_11_1_MSVC2022_X64_ROOT",
+        "CMAKE_FIND_PACKAGE_PREFER_CONFIG": "ON",
+        "OPENSSL_USE_STATIC_LIBS": "OFF",
+        "SQLITEBROWSER_DEPENDENCY_SDK_POLICY": "WARN",
+        "SQLITEBROWSER_DEPLOY_RUNTIME": "ON",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
+        "QT_MAJOR": "Qt6",
+        "sqlcipher": "ON",
+        "ENABLE_TESTING": "ON",
+        "BUILD_SHARED_LIBS": "OFF",
+        "FORCE_INTERNAL_QSCINTILLA": "ON",
+        "FORCE_INTERNAL_QCUSTOMPLOT": "ON",
+        "FORCE_INTERNAL_QHEXEDIT": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "windows-x64-base",
+      "displayName": "Windows x64 shared Debug",
+      "description": "Configure the Debug build tree with Debug dependency stages",
+      "binaryDir": "${sourceDir}/build/x64-shared-debug",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Debug",
+        "OpenSSL_DIR": "${sourceDir}/build/openssl/x64-debug/stage/lib/cmake/OpenSSL",
+        "OPENSSL_ROOT_DIR": "${sourceDir}/build/openssl/x64-debug/stage",
+        "SQLCIPHER_ROOT_DIR": "${sourceDir}/build/sqlcipher/x64-debug/stage"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "windows-x64-base",
+      "displayName": "Windows x64 shared Release",
+      "description": "Configure the Release build tree with Release dependency stages",
+      "binaryDir": "${sourceDir}/build/x64-shared-release",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Release",
+        "OpenSSL_DIR": "${sourceDir}/build/openssl/x64-release/stage/lib/cmake/OpenSSL",
+        "OPENSSL_ROOT_DIR": "${sourceDir}/build/openssl/x64-release/stage",
+        "SQLCIPHER_ROOT_DIR": "${sourceDir}/build/sqlcipher/x64-release/stage"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "jobs": 0
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "jobs": 0
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
