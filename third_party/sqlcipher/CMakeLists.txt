@@ -41,7 +41,7 @@ set(CMAKE_CONFIGURATION_TYPES "${SQLCIPHER_CONFIGURATION}" CACHE STRING
     "Supported SQLCipher configuration" FORCE
 )
 
-set(SQLCIPHER_WINDOWS_SDK_VERSION "10.0.22621.0" CACHE STRING
+set(SQLCIPHER_WINDOWS_SDK_VERSION "10.0.26100.0" CACHE STRING
     "Required Windows SDK version"
 )
 if(DEFINED CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION
@@ -163,21 +163,35 @@ else()
     set(_configuration_crt "/MD")
 endif()
 
+file(READ "${SQLCIPHER_SOURCE_DIR}/VERSION" _sqlite_version)
+string(STRIP "${_sqlite_version}" _sqlite_version)
+string(REPLACE "." "," _sqlite_resource_version "${_sqlite_version}")
+
 set(_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_generated_sqlite3_c "${_generated_dir}/sqlite3.c")
 set(_generated_sqlite3_h "${_generated_dir}/sqlite3.h")
 set(_generated_sqlite3ext_h "${_generated_dir}/sqlite3ext.h")
 set(_generated_sqlite3session_h "${_generated_dir}/sqlite3session.h")
 set(_generated_shell_c "${_generated_dir}/shell.c")
+set(_sqlite_resource_header "${_generated_dir}/sqlite3rc.h")
+set(_sqlite_resource_header_template
+    "${CMAKE_CURRENT_BINARY_DIR}/sqlite3rc.generated.h"
+)
 set(_generated_outputs
     "${_generated_sqlite3_c}"
     "${_generated_sqlite3_h}"
     "${_generated_sqlite3ext_h}"
     "${_generated_sqlite3session_h}"
     "${_generated_shell_c}"
+    "${_sqlite_resource_header}"
 )
 
 file(MAKE_DIRECTORY "${_generated_dir}")
+file(WRITE "${_sqlite_resource_header_template}"
+    "#ifndef SQLITE_RESOURCE_VERSION\n"
+    "#define SQLITE_RESOURCE_VERSION ${_sqlite_resource_version}\n"
+    "#endif\n"
+)
 file(TO_NATIVE_PATH "${SQLCIPHER_SOURCE_DIR}" _source_native)
 file(TO_NATIVE_PATH "${SQLCIPHER_SOURCE_DIR}/Makefile.msc" _makefile_native)
 
@@ -207,6 +221,9 @@ add_custom_command(
     COMMAND "${SQLCIPHER_NMAKE_EXECUTABLE}"
         ${_nmake_common_arguments}
         sqlite3.c sqlite3.h sqlite3ext.h sqlite3session.h shell.c
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${_sqlite_resource_header_template}"
+        "${_sqlite_resource_header}"
     DEPENDS
         "${SQLCIPHER_SOURCE_DIR}/Makefile.msc"
         "${SQLCIPHER_SOURCE_DIR}/VERSION"
@@ -216,6 +233,7 @@ add_custom_command(
         "${SQLCIPHER_SOURCE_DIR}/src/crypto_openssl.c"
         "${SQLCIPHER_SOURCE_DIR}/src/sqlite.h.in"
         "${SQLCIPHER_SOURCE_DIR}/src/shell.c.in"
+        "${_sqlite_resource_header_template}"
     WORKING_DIRECTORY "${_generated_dir}"
     COMMENT "Generating SQLCipher ${PROJECT_VERSION} sources with Makefile.msc"
     USES_TERMINAL
@@ -225,19 +243,10 @@ add_custom_command(
 add_custom_target(sqlcipher_generate DEPENDS ${_generated_outputs})
 set_source_files_properties(${_generated_outputs} PROPERTIES GENERATED TRUE)
 
-file(READ "${SQLCIPHER_SOURCE_DIR}/VERSION" _sqlite_version)
-string(STRIP "${_sqlite_version}" _sqlite_version)
-string(REPLACE "." "," _sqlite_resource_version "${_sqlite_version}")
-set(_sqlite_resource_header "${_generated_dir}/sqlite3rc.h")
-file(WRITE "${_sqlite_resource_header}"
-    "#ifndef SQLITE_RESOURCE_VERSION\n"
-    "#define SQLITE_RESOURCE_VERSION ${_sqlite_resource_version}\n"
-    "#endif\n"
-)
-
 set(_sqlite_resource "${SQLCIPHER_SOURCE_DIR}/src/sqlite3.rc")
 set_source_files_properties("${_sqlite_resource}" PROPERTIES
     OBJECT_DEPENDS "${_generated_sqlite3_h};${_sqlite_resource_header}"
+    INCLUDE_DIRECTORIES "${_generated_dir}"
 )
 
 add_library(OpenSSL::Crypto SHARED IMPORTED GLOBAL)
@@ -297,7 +306,10 @@ set_target_properties(sqlcipher PROPERTIES
     C_EXTENSIONS NO
 )
 
-add_executable(sqlcipher_cli "${_generated_shell_c}" "${_sqlite_resource}")
+add_executable(sqlcipher_cli EXCLUDE_FROM_ALL
+    "${_generated_shell_c}"
+    "${_sqlite_resource}"
+)
 add_dependencies(sqlcipher_cli sqlcipher_generate)
 target_compile_definitions(sqlcipher_cli PRIVATE
     ${_common_private_definitions}
@@ -330,9 +342,11 @@ set_tests_properties(sqlcipher.provider.smoke PROPERTIES
 )
 
 include(GNUInstallDirs)
-install(TARGETS sqlcipher sqlcipher_cli
+install(TARGETS sqlcipher
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT SQLCipherProduct
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        COMPONENT SQLCipherProduct
     INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/sqlcipher"
 )
 install(FILES
@@ -340,17 +354,19 @@ install(FILES
     "${_generated_sqlite3ext_h}"
     "${_generated_sqlite3session_h}"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/sqlcipher"
+    COMPONENT SQLCipherProduct
 )
 install(FILES
     "$<TARGET_PDB_FILE:sqlcipher>"
-    "$<TARGET_PDB_FILE:sqlcipher_cli>"
     DESTINATION "${CMAKE_INSTALL_BINDIR}"
     CONFIGURATIONS Debug Release
+    COMPONENT SQLCipherProduct
 )
 install(FILES
     "${SQLCIPHER_SOURCE_DIR}/LICENSE.md"
     "${SQLCIPHER_SOURCE_DIR}/SQLITE_LICENSE.md"
     DESTINATION "share/licenses/sqlcipher"
+    COMPONENT SQLCipherProduct
 )
 
 set(_settings_file "${CMAKE_CURRENT_BINARY_DIR}/sqlcipher-build-settings.txt")

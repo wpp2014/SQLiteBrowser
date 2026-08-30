@@ -15,6 +15,7 @@ CMakeFiles
 
 # ignore any build folders
 build*/
+/output/
 # folder with temporary test data
 testdata/
 

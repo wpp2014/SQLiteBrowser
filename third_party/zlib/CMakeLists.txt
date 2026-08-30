@@ -25,7 +25,7 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
 endif()
 
 set(ZLIB_WINDOWS_SDK_VERSION
-    "10.0.22621.0"
+    "10.0.26100.0"
     CACHE STRING "Required Windows SDK version"
 )
 if(DEFINED CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION
@@ -96,6 +96,22 @@ endif()
 set_target_properties(zlib PROPERTIES
     OUTPUT_NAME "zlib1"
     DEBUG_POSTFIX ""
+)
+
+# Keep Release optimized while emitting the linker PDB used for crash analysis.
+# Compiler PDBs remain in the private work directory.
+target_compile_options(zlib PRIVATE
+    "$<$<CONFIG:Release>:/Zi>"
+)
+target_link_options(zlib PRIVATE
+    "$<$<CONFIG:Release>:/DEBUG:FULL>"
+    "$<$<CONFIG:Release>:/OPT:REF>"
+    "$<$<CONFIG:Release>:/OPT:ICF>"
+)
+
+install(FILES "$<TARGET_PDB_FILE:zlib>"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    CONFIGURATIONS Debug Release
 )
 
 message(STATUS "zlib source: ${ZLIB_SOURCE_DIR}")

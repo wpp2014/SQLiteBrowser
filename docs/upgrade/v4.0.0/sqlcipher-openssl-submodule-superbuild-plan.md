@@ -1,5 +1,7 @@
 # SQLCipher 与 OpenSSL 子模块化及统一构建方案
 
+> 2026-08-30 更新：Brotli、OpenSSL 与 SQLCipher 已迁移到 SDK 26100 和配置优先的 `output/` 私有 stage。SQLCipher 普通 build 与 CLI/provider test 已拆分；现行命令和产物契约见 [SQLCipher 构建脚本与项目 Skill 使用说明](sqlcipher-build-automation-guide.md)。本文保留早期 superbuild 设计与旧路径作为历史记录。
+
 ## 1. 文档目的
 
 本文分析在 SQLiteBrowser 的 `upgrade/v4.0.0` 分支中，将 SQLCipher 4.18.0 与 OpenSSL 3.5.7 作为 Git submodule 引入，并在 Windows、Visual Studio 2022、Windows SDK 10.0.22621.0 下统一构建的可行方案。

@@ -30,7 +30,7 @@
         "CMAKE_PREFIX_PATH": "REPLACE_WITH_QT_6_11_1_MSVC2022_X64_ROOT",
         "CMAKE_FIND_PACKAGE_PREFER_CONFIG": "ON",
         "OPENSSL_USE_STATIC_LIBS": "OFF",
-        "SQLITEBROWSER_DEPENDENCY_SDK_POLICY": "WARN",
+        "SQLITEBROWSER_DEPENDENCY_SDK_POLICY": "STRICT",
         "SQLITEBROWSER_DEPLOY_RUNTIME": "ON",
         "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
         "QT_MAJOR": "Qt6",
@@ -46,26 +46,28 @@
       "name": "debug",
       "inherits": "windows-x64-base",
       "displayName": "Windows x64 shared Debug",
-      "description": "Configure the Debug build tree with Debug dependency stages",
-      "binaryDir": "${sourceDir}/build/x64-shared-debug",
+      "description": "Configure the Debug application tree in the unified Debug output root",
+      "binaryDir": "${sourceDir}/output/x64-shared-debug/build/sqlitebrowser",
       "cacheVariables": {
         "CMAKE_CONFIGURATION_TYPES": "Debug",
-        "OpenSSL_DIR": "${sourceDir}/build/openssl/x64-debug/stage/lib/cmake/OpenSSL",
-        "OPENSSL_ROOT_DIR": "${sourceDir}/build/openssl/x64-debug/stage",
-        "SQLCIPHER_ROOT_DIR": "${sourceDir}/build/sqlcipher/x64-debug/stage"
+        "SQLITEBROWSER_CONFIGURATION_ROOT": "${sourceDir}/output/x64-shared-debug",
+        "OpenSSL_DIR": "${sourceDir}/output/x64-shared-debug/build/openssl/stage/lib/cmake/OpenSSL",
+        "OPENSSL_ROOT_DIR": "${sourceDir}/output/x64-shared-debug/build/openssl/stage",
+        "SQLCIPHER_ROOT_DIR": "${sourceDir}/output/x64-shared-debug/build/sqlcipher/stage"
       }
     },
     {
       "name": "release",
       "inherits": "windows-x64-base",
       "displayName": "Windows x64 shared Release",
-      "description": "Configure the Release build tree with Release dependency stages",
-      "binaryDir": "${sourceDir}/build/x64-shared-release",
+      "description": "Configure the Release application tree in the unified Release output root",
+      "binaryDir": "${sourceDir}/output/x64-shared-release/build/sqlitebrowser",
       "cacheVariables": {
         "CMAKE_CONFIGURATION_TYPES": "Release",
-        "OpenSSL_DIR": "${sourceDir}/build/openssl/x64-release/stage/lib/cmake/OpenSSL",
-        "OPENSSL_ROOT_DIR": "${sourceDir}/build/openssl/x64-release/stage",
-        "SQLCIPHER_ROOT_DIR": "${sourceDir}/build/sqlcipher/x64-release/stage"
+        "SQLITEBROWSER_CONFIGURATION_ROOT": "${sourceDir}/output/x64-shared-release",
+        "OpenSSL_DIR": "${sourceDir}/output/x64-shared-release/build/openssl/stage/lib/cmake/OpenSSL",
+        "OPENSSL_ROOT_DIR": "${sourceDir}/output/x64-shared-release/build/openssl/stage",
+        "SQLCIPHER_ROOT_DIR": "${sourceDir}/output/x64-shared-release/build/sqlcipher/stage"
       }
     }
   ],
@@ -74,12 +76,28 @@
       "name": "debug",
       "configurePreset": "debug",
       "configuration": "Debug",
+      "targets": ["sqlitebrowser"],
       "jobs": 0
     },
     {
       "name": "release",
       "configurePreset": "release",
       "configuration": "Release",
+      "targets": ["sqlitebrowser"],
+      "jobs": 0
+    },
+    {
+      "name": "unit-tests-debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "targets": ["sqlitebrowser_unit_tests"],
+      "jobs": 0
+    },
+    {
+      "name": "unit-tests-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_unit_tests"],
       "jobs": 0
     }
   ],
@@ -99,6 +117,44 @@
       "output": {
         "outputOnFailure": true
       }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "test-debug",
+      "displayName": "Configure, build, and run Debug unit tests",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "unit-tests-debug"
+        },
+        {
+          "type": "test",
+          "name": "debug"
+        }
+      ]
+    },
+    {
+      "name": "test-release",
+      "displayName": "Configure, build, and run Release unit tests",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "unit-tests-release"
+        },
+        {
+          "type": "test",
+          "name": "release"
+        }
+      ]
     }
   ]
 }

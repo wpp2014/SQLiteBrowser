@@ -1,86 +1,113 @@
 ---
 name: sqlitebrowser-build-openssl
-description: Build, test, verify, and stage the repository-pinned OpenSSL 3.5.7 on Windows x64 with Visual Studio 2022 and SDK 10.0.22621.0. Use for OpenSSL environment checks, builds, test selection, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide OpenSSL installation or non-Windows targets.
+description: Build, test, verify, and stage the repository-pinned OpenSSL 3.5.7 on Windows x64 with Visual Studio 2022 and SDK 10.0.26100.0. Use for OpenSSL environment checks, minimal Crypto/SSL product builds, safe or full test runs, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, final app packaging, or non-Windows targets.
 ---
 
 # SQLiteBrowser OpenSSL Build
 
-Use the repository script as the single source of truth for OpenSSL build commands. Do not reproduce or replace its Configure and NMake workflow unless the user explicitly asks to change the automation.
+Use third_party\openssl\build.cmd as the single source of truth. Do not reproduce its Configure or NMake workflow unless the user explicitly asks to change the automation.
 
 ## Establish scope
 
-- Work from the SQLiteBrowser repository containing `third_party/openssl/src` and a verified, matching `build/brotli/x64-<config>/stage`.
-- Treat `third_party/openssl/src` as pinned upstream source. Do not edit it.
-- Target Windows x64, Visual Studio 2022, MSVC v143, and Windows SDK `10.0.22621.0`.
-- Treat installation into `build/openssl/x64-<config>/stage` as staging. It is not system installation or final application packaging.
-- OpenSSL uses Brotli in dynamic-loading mode. A Debug OpenSSL build must consume the Debug Brotli stage and Release must consume Release; never mix configurations.
+- Work from the SQLiteBrowser repository containing third_party/openssl/src.
+- Treat the OpenSSL source submodule as pinned upstream source; do not edit it.
+- Target Windows x64, Visual Studio 2022, MSVC v143, and Windows SDK 10.0.26100.0.
+- Require a matching Brotli stage at output/x64-shared-<config>/build/brotli/stage.
+- Debug OpenSSL consumes only Debug Brotli; Release consumes only Release Brotli.
+- Treat output/x64-shared-<config>/build/openssl/stage as a private dependency stage, not a system installation or final application package.
 - Preserve unrelated worktree changes. Never commit or push unless separately requested.
 
-If the user asks only for analysis, inspect the source, build tree, or logs without running a build or changing files.
+If the user asks only for analysis, inspect source, scripts, manifests, or logs without running a build or changing files.
 
-## Select a build invocation
+## Select an invocation
 
-Invoke `third_party\openssl\build.cmd` from any working directory in the repository.
+Run the script from any directory in the repository.
 
-- No explicit choices: use `all safe`.
-- Debug only: use `debug`.
-- Release only: use `release`.
-- Reproducible rebuild explicitly requested: add `clean`.
-- Environment validation only: use `check`.
-- Quick incremental build explicitly requested: use `none`, then disclose that tests were skipped.
-- Formal release verification: use `release full clean`.
+~~~cmd
+third_party\openssl\build.cmd check [all|debug|release]
+third_party\openssl\build.cmd build [all|debug|release]
+third_party\openssl\build.cmd test <all|debug|release> [safe|full]
+third_party\openssl\build.cmd clean [all|debug|release]
+~~~
 
-Test modes are significant:
+Selection rules:
 
-- `safe` runs the suite except `test_bio_dgram`, avoiding the known IPv6 UDP loopback hang. Report this as a partial test pass.
-- `full` performs an IPv6 UDP loopback preflight and then runs the full suite. If the preflight fails, stop and report the network-filter conflict; do not silently downgrade.
-- `none` skips `nmake test` but still verifies staged artifacts. Never report it as tested.
+- No arguments means build all. It does not run tests.
+- Ordinary product build: build all, or one explicit configuration.
+- Environment validation only: check.
+- Test an existing verified build: test <config> safe unless the user explicitly requests full.
+- Reproducible rebuild: clean <config>, followed by build <config>.
+- Do not delete build directories unless clean was requested or approved.
 
-Do not add OpenSSL's `no-tests` Configure option. Keeping test programs available allows later full validation.
+Test modes:
+
+- safe runs the general suite with test_bio_dgram excluded, then runs test_bio_comp, test_cert_comp, and test_tls13certcomp. Report it as a safe partial pass, never a full pass.
+- full performs the IPv6 UDP loopback preflight, runs the unfiltered suite, then the same focused Brotli tests. If preflight fails, stop and report the local network-filter conflict.
+
+The build action never runs tests. Do not add no-tests to Configure because the separate test action must remain available.
 
 ## Execute and monitor
 
-1. Read `docs/upgrade/v4.0.0/openssl-build-automation-guide.md` when usage, output layout, deployment, or troubleshooting detail is needed.
-2. Run the selected repository script command.
-3. Surface prerequisite failures exactly: Visual Studio edition, SDK, Perl, NASM, Git, MSVC tools, or the matching Brotli stage and manifest. Do not install missing tools automatically.
-4. During test execution, track the last test name. If a full test produces no progress for an extended period, inspect the active process and network state before considering termination.
-5. Do not delete build directories unless the user selected or approved `clean`.
+1. Read docs/upgrade/v4.0.0/openssl-build-automation-guide.md when usage, layout, deployment, or troubleshooting detail is needed.
+2. Run the selected repository command.
+3. Surface prerequisite failures exactly: VS edition, SDK, Perl, NASM, Git, MSVC tools, source revision, or matching Brotli stage.
+4. During tests, track the last recipe. A quiet stress test is not automatically a hang; inspect processes and network state before terminating.
+5. Keep test-only CLI, provider, fuzz, and recipe executables inside the configuration work directory.
 
-## Validate the result
+## Validate a product build
 
-The script must finish successfully and the selected stage must contain:
+The stage must contain:
 
-- `bin/libcrypto-3-x64.dll`
-- `bin/libssl-3-x64.dll`
-- `bin/openssl.exe`
-- `bin/brotlicommon.dll`
-- `bin/brotlidec.dll`
-- `bin/brotlienc.dll`
-- `include/openssl/opensslv.h`
-- `lib/libcrypto.lib`
-- `lib/libssl.lib`
-- `lib/cmake/OpenSSL/OpenSSLConfig.cmake`
-- `lib/ossl-modules/legacy.dll`
-- `build-manifest.txt`
+- bin/libcrypto-3-x64.dll and its linker PDB;
+- bin/libssl-3-x64.dll and its linker PDB;
+- matching bin/brotlicommon.dll, bin/brotlidec.dll, and bin/brotlienc.dll;
+- include/openssl/opensslv.h and the public OpenSSL headers;
+- lib/libcrypto.lib and lib/libssl.lib;
+- lib/cmake/OpenSSL/OpenSSLConfig.cmake;
+- build-manifest.txt with Tests: not run.
 
-Confirm Release DLLs do not depend on `VCRUNTIME140D.dll` or `ucrtbased.dll`. Debug DLLs are development artifacts and must not enter a Release package.
+The stage must not contain:
 
-Confirm `configdata.pm` records both `brotli` and `brotli-dynamic`, with the include directory from the matching Brotli stage. Confirm `libcrypto-3-x64.dll` exports `COMP_brotli`, `COMP_brotli_oneshot`, and `BIO_f_brotli`, but has no direct Brotli DLL dependency. For `safe` and `full`, require the focused `test_bio_comp`, `test_cert_comp`, and `test_tls13certcomp` run to pass in addition to the selected general test suite. The three Brotli DLLs copied into the OpenSSL stage must be byte-identical to the validated source stage.
+- openssl.exe;
+- legacy.dll or other provider modules;
+- engine DLLs;
+- vc143.pdb or another compiler PDB;
+- test, fuzz, example, or demo executables.
+
+Confirm:
+
+- DLL architecture is x64;
+- Debug uses Debug CRT and Release does not depend on VCRUNTIME140D.dll or ucrtbased.dll;
+- configdata.pm records Brotli dynamic loading and the matching Brotli include path;
+- libcrypto exports COMP_brotli, COMP_brotli_oneshot, and BIO_f_brotli;
+- libcrypto has no direct Brotli DLL import;
+- staged Brotli DLLs are byte-identical to the validated Brotli stage.
+
+## Validate a test run
+
+- Require an existing verified build-manifest.txt before testing.
+- Require stage/test-manifest.txt after success.
+- Verify its Build manifest SHA-256 equals the current build-manifest.txt hash.
+- Require the selected general suite and all three focused Brotli tests to pass.
+- For safe mode, require the record to state that test_bio_dgram was excluded.
+- Confirm no test executable, CLI, provider, or engine DLL entered the stage.
+- Do not rewrite build-manifest.txt to claim tests ran; build and test records are intentionally separate.
 
 ## Deployment boundary
 
-For ordinary requests, deployment ends at the configuration-specific stage. The current x64 WiX installer still references OpenSSL 1.1.1 filenames, so do not copy OpenSSL 3 DLLs into application or installer output and do not modify installer definitions unless the user explicitly expands the task.
+For ordinary requests, deployment ends at the configuration-specific OpenSSL stage. Do not copy files to the application or installer output until the later public-output and application migration phases request it.
 
-For a future application deployment, use the Release `libcrypto-3-x64.dll`, `libssl-3-x64.dll`, `brotlicommon.dll`, `brotlidec.dll`, and `brotlienc.dll` as one matched runtime set. Deploy `legacy.dll`, engines, `openssl.cnf`, or `openssl.exe` only when a demonstrated runtime requirement exists, and account for OpenSSL's configured module and configuration search paths.
+The eventual application runtime set is the matching Release pair of OpenSSL DLLs plus all three Brotli DLLs. Deploy openssl.exe, providers, engines, configuration files, import libraries, or PDBs only for a demonstrated development or packaging requirement.
 
 ## Report
 
 Return:
 
-- selected VS edition, MSVC tools version, and SDK;
-- OpenSSL tag and commit;
-- configurations and test mode used;
-- exact stage paths;
-- build, test, install, provider, and CRT verification results;
-- Brotli stage provenance, dynamic-loading/export checks, focused integration-test result, and staged Brotli DLL identity checks;
-- every skipped test or unresolved deployment blocker.
+- selected VS edition, MSVC tools, and SDK;
+- OpenSSL and Brotli tag/commit provenance;
+- configuration and action;
+- exact work and stage paths;
+- minimal-stage and CRT results;
+- Brotli export, dynamic-loading, and byte-identity results;
+- test mode, suite totals, focused-test result, build-manifest binding, and every excluded/skipped item;
+- any unresolved consumer or packaging migration blocker.

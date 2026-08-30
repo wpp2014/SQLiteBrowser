@@ -7,7 +7,40 @@
 > 目标平台：Windows x64
 > 目标工具链：Visual Studio 2022、MSVC v143、Windows SDK 10.0.26100.0
 > 目标 Qt：Qt 6.11.1 MSVC2022 x64，本地路径由开发者在 CMakePresets.json 中填写
-> 当前状态：阶段 0 至阶段 4 已完成；install、干净机器 Release gate、ZIP/NSIS、签名和版本号仍留在阶段 5。
+> 当前状态：原主程序阶段 0 至阶段 4、统一输出阶段 6 和独立单元测试 workflow 阶段 7 均已完成；install、干净机器 Release gate、ZIP/NSIS、签名和版本号仍待后续阶段。
+
+## 0.1 统一输出阶段 6 检查点（2026-08-30）
+
+本文后续 `build/x64-shared-<config>` 路径记录的是原阶段 1 至阶段 4 的历史实施结果。统一输出重构阶段 6 已将当前正式路径改为：
+
+~~~text
+output/x64-shared-debug/build/sqlitebrowser
+output/x64-shared-debug/bin
+output/x64-shared-release/build/sqlitebrowser
+output/x64-shared-release/bin
+~~~
+
+`CMakePresets.template.json` 和本地 Preset 现在绑定同配置的 `output/.../build/openssl/stage`、`output/.../build/sqlcipher/stage` 和 `SQLITEBROWSER_CONFIGURATION_ROOT`。build preset 显式只构建 `sqlitebrowser`；EXE/PDB、Qt runtime 及 SQLCipher/OpenSSL/Brotli runtime 进入公共 development `bin`。SDK policy 已切换为 `STRICT`。
+
+Debug、Release 的 configure、build、POST_BUILD 校验及受限 `PATH` 启动均已通过。阶段 5 依赖聚合在主程序部署后重复执行，也不会删除或改写应用与 Qt 文件。公共 `bin` 仍是开发输出，不是最终安装包；package runtime 的严格整理留给后续阶段。
+
+## 0.2 统一输出阶段 7 检查点（2026-08-30）
+
+四个单元测试已改为 `EXCLUDE_FROM_ALL`，由 `sqlitebrowser_unit_tests` 聚合 target 显式构建，并输出到：
+
+~~~text
+output/x64-shared-debug/build/tests/unit
+output/x64-shared-release/build/tests/unit
+~~~
+
+正式测试入口为：
+
+~~~cmd
+cmake --workflow --preset test-debug
+cmake --workflow --preset test-release
+~~~
+
+两个 workflow 都执行 configure、对应 `unit-tests-*` build preset 和 CTest，实际结果均为 4/4 通过。普通 `debug`/`release` 产品 build preset 仍只构建 `sqlitebrowser`；复跑产品构建没有重新生成测试 EXE，公共 `bin` 也没有测试程序。
 
 ## 1. 结论
 

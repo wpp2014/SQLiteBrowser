@@ -55,17 +55,13 @@ if(DEFINED SQLITEBROWSER_RUNTIME_VERIFY_DIR)
         endif()
     endforeach()
 
+    # This is the unified development bin, not the package runtime. Dependency
+    # import libraries and linker PDBs, plus the optional zlib/zstd products,
+    # are valid here. Packaging uses a separate strict runtime allowlist.
     set(_forbidden_runtime_files
-        "zlib1.dll"
-        "libzstd.dll"
         "openssl.exe"
         "sqlcipher.exe"
-        "sqlcipher.pdb"
-        "libcrypto-3-x64.pdb"
-        "libssl-3-x64.pdb"
-        "brotlicommon.pdb"
-        "brotlidec.pdb"
-        "brotlienc.pdb"
+        "vc143.pdb"
     )
     foreach(_relative_path IN LISTS _forbidden_runtime_files)
         if(EXISTS "${_runtime_dir}/${_relative_path}")

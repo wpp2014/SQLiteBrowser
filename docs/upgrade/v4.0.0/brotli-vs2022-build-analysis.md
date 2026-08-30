@@ -1,5 +1,7 @@
 # Brotli v1.2.0 Windows x64 / VS2022 构建分析
 
+> 2026-08-30 更新：统一输出与最小构建已经实施。当前 SDK、命令、stage 与 build/test manifest 契约以 [Windows 统一输出目录与最小构建方案](unified-output-and-minimal-build-plan.md) 和 `third_party/brotli/build.cmd --help` 为准；本文后面的旧路径和旧命令保留为历史分析记录。
+
 > 分析版本：Brotli `v1.2.0`
 >
 > 上游提交：`028fb5a23661f123017c060daa546b55cf4bde29`

@@ -1,6 +1,6 @@
 ---
 name: sqlitebrowser-build-zlib
-description: Build, test, verify, and stage the repository-pinned zlib 1.3.2 on Windows x64 with Visual Studio 2022 and SDK 10.0.22621.0. Use for zlib environment checks, Debug or Release builds, CTest runs, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, minizip/contrib builds, static zlib, or non-Windows targets.
+description: Build, test, verify, and stage the repository-pinned zlib 1.3.2 on Windows x64 with Visual Studio 2022 and SDK 10.0.26100.0. Use for zlib environment checks, minimal Debug or Release builds, separate CTest runs, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, minizip/contrib builds, static zlib, or non-Windows targets.
 ---
 
 # SQLiteBrowser zlib Build
@@ -11,10 +11,10 @@ Use `third_party\zlib\build.cmd` as the single source of truth. Do not reproduce
 
 - Work from the SQLiteBrowser repository containing `third_party/zlib/src`.
 - Treat `third_party/zlib/src` as pinned upstream source. Do not edit it.
-- Target Windows x64, Visual Studio 2022, MSVC v143, and Windows SDK `10.0.22621.0`.
+- Target Windows x64, Visual Studio 2022, MSVC v143, and Windows SDK `10.0.26100.0`.
 - Build only the shared zlib library. Keep minizip, every other contrib component, and static zlib disabled.
-- Require both Debug and Release DLLs to be named `zlib1.dll`; keep their matching `zlib1.lib` import libraries in the configuration-specific stage.
-- Treat `build/zlib/x64-<config>/stage` as staging, not system installation or final application packaging.
+- Require both Debug and Release DLLs to be named `zlib1.dll`; keep matching `zlib1.lib` import libraries and linker `zlib1.pdb` files in the configuration-specific stage.
+- Treat `output/x64-shared-<config>/build/zlib/stage` as staging, not system installation or final application packaging.
 - Preserve unrelated worktree changes. Never commit or push unless separately requested.
 
 If the user asks only for analysis, log inspection, or an explanation, do not run a build or modify files.
@@ -23,15 +23,16 @@ If the user asks only for analysis, log inspection, or an explanation, do not ru
 
 Invoke the script from any working directory in the repository.
 
-- No explicit configuration: use `third_party\zlib\build.cmd all`.
-- Debug only: use `third_party\zlib\build.cmd debug`.
-- Release only: use `third_party\zlib\build.cmd release`.
+- No explicit configuration: use `third_party\zlib\build.cmd build all`.
+- Debug only: use `third_party\zlib\build.cmd build debug`.
+- Release only: use `third_party\zlib\build.cmd build release`.
 - Environment validation only: use `third_party\zlib\build.cmd check`.
-- Reproducible rebuild explicitly requested: add `clean` to the selected build configuration.
+- Tests: use `third_party\zlib\build.cmd test <debug|release|all>` after a successful matching build.
+- Cleanup explicitly requested: use `third_party\zlib\build.cmd clean <debug|release|all>`.
 
 Do not add `clean` unless the user selected it or approved removing the selected ignored zlib work and stage directories.
 
-Every actual build runs CTest. This workflow has no skip-test mode. If a test fails, report the failure; do not treat generated artifacts as a successful verified build.
+The build action compiles only `zlib`, stages product artifacts, and marks tests `not run`. The test action builds the excluded example target, runs CTest, and writes `test-manifest.txt` bound to the build manifest SHA-256.
 
 ## Execute and monitor
 
@@ -46,12 +47,13 @@ Every actual build runs CTest. This workflow has no skip-test mode. If a test fa
 The script must finish successfully. Each selected stage must contain:
 
 - `bin/zlib1.dll`
+- `bin/zlib1.pdb`
 - `include/zlib.h`
 - `include/zconf.h`
 - `lib/zlib1.lib`
 - `build-manifest.txt`
 
-Confirm the manifest records zlib `v1.3.2`, commit `da607da739fa6047df13e66a2af6b8bec7c2a498`, the selected configuration, x64, VS/MSVC/SDK/CMake, `/MDd` or `/MD`, and a passed CTest run.
+Confirm the build manifest records zlib `v1.3.2`, commit `da607da739fa6047df13e66a2af6b8bec7c2a498`, the selected configuration, x64, VS/MSVC/SDK/CMake, `/MDd` or `/MD`, linker-PDB policy, and tests as `not run`. After `test`, confirm `test-manifest.txt` records passed CTest and the matching build manifest SHA-256.
 
 Also confirm:
 

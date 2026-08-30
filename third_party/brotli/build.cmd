@@ -6,29 +6,37 @@ for %%I in ("%SCRIPT_DIR%..\..") do set "PROJECT_ROOT=%%~fI"
 for %%I in ("%SCRIPT_DIR%.") do set "BROTLI_CMAKE_DIR=%%~fI"
 
 set "BROTLI_SRC=%SCRIPT_DIR%src"
-set "BROTLI_BUILD_ROOT=%PROJECT_ROOT%\build\brotli"
+set "OUTPUT_ROOT=%PROJECT_ROOT%\output"
 set "EXPECTED_BROTLI_COMMIT=028fb5a23661f123017c060daa546b55cf4bde29"
 set "EXPECTED_BROTLI_TAG=v1.2.0"
 set "EXPECTED_BROTLI_VERSION=1.2.0"
-set "REQUIRED_WINDOWS_SDK=10.0.22621.0"
+set "REQUIRED_WINDOWS_SDK=10.0.26100.0"
 
+set "ACTION=build"
+set "ACTION_EXPLICIT=0"
 set "BUILD_CONFIG=all"
-set "CLEAN_BUILD=0"
-set "CHECK_ONLY=0"
 
 :parse_arguments
 if "%~1"=="" goto arguments_parsed
 
-if /i "%~1"=="all" (
+if /i "%~1"=="build" (
+    call :set_action build
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="test" (
+    call :set_action test
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="clean" (
+    call :set_action clean
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="check" (
+    call :set_action check
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="all" (
     set "BUILD_CONFIG=all"
 ) else if /i "%~1"=="debug" (
     set "BUILD_CONFIG=debug"
 ) else if /i "%~1"=="release" (
     set "BUILD_CONFIG=release"
-) else if /i "%~1"=="clean" (
-    set "CLEAN_BUILD=1"
-) else if /i "%~1"=="check" (
-    set "CHECK_ONLY=1"
 ) else if /i "%~1"=="--help" (
     goto show_help
 ) else if /i "%~1"=="-h" (
@@ -45,11 +53,6 @@ shift
 goto parse_arguments
 
 :arguments_parsed
-if "!CHECK_ONLY!"=="1" if "!CLEAN_BUILD!"=="1" (
-    echo ERROR: check and clean cannot be used together.
-    exit /b 1
-)
-
 set "LC_ALL=C"
 set "LANG=C"
 set "LANGUAGE="
@@ -57,9 +60,8 @@ set "VSCMD_SKIP_SENDTELEMETRY=1"
 
 echo [Brotli] Project root:  !PROJECT_ROOT!
 echo [Brotli] Source:        !BROTLI_SRC!
+echo [Brotli] Action:        !ACTION!
 echo [Brotli] Configuration: !BUILD_CONFIG!
-if "!CLEAN_BUILD!"=="1" echo [Brotli] Clean rebuild: yes
-if "!CHECK_ONLY!"=="1" echo [Brotli] Check only: yes
 echo.
 
 call :require_tool git.exe "Install Git and add git.exe to PATH."
@@ -75,7 +77,7 @@ call :check_cmake_version
 if errorlevel 1 exit /b 1
 
 if not exist "!BROTLI_SRC!\CMakeLists.txt" (
-    if "!CHECK_ONLY!"=="1" (
+    if /i "!ACTION!"=="check" (
         echo ERROR: The Brotli submodule is not initialised: !BROTLI_SRC!
         echo Run: git submodule update --init --recursive
         exit /b 1
@@ -178,10 +180,13 @@ echo [Brotli] MSVC tools: !VCToolsVersion!
 echo [Brotli] Windows SDK: !WINDOWS_SDK_ACTUAL!
 echo [Brotli] CMake: !CMAKE_VERSION!
 
-if "!CHECK_ONLY!"=="1" (
+if /i "!ACTION!"=="check" (
     echo [Brotli] Environment check completed successfully. No build was performed.
     exit /b 0
 )
+
+if /i "!ACTION!"=="clean" goto dispatch_clean
+if /i "!ACTION!"=="test" goto dispatch_test
 
 if /i "!BUILD_CONFIG!"=="all" (
     call :build_one Debug
@@ -197,8 +202,52 @@ if /i "!BUILD_CONFIG!"=="all" (
 )
 
 echo.
-echo [Brotli] Requested build completed successfully.
-echo [Brotli] Build root: !BROTLI_BUILD_ROOT!
+echo [Brotli] Requested minimal product build completed successfully.
+echo [Brotli] Output root: !OUTPUT_ROOT!
+exit /b 0
+
+:dispatch_test
+if /i "!BUILD_CONFIG!"=="all" (
+    call :test_one Debug
+    if errorlevel 1 exit /b 1
+    call :test_one Release
+    if errorlevel 1 exit /b 1
+) else if /i "!BUILD_CONFIG!"=="debug" (
+    call :test_one Debug
+    if errorlevel 1 exit /b 1
+) else (
+    call :test_one Release
+    if errorlevel 1 exit /b 1
+)
+echo.
+echo [Brotli] Requested tests completed successfully.
+exit /b 0
+
+:dispatch_clean
+if /i "!BUILD_CONFIG!"=="all" (
+    call :clean_one Debug
+    if errorlevel 1 exit /b 1
+    call :clean_one Release
+    if errorlevel 1 exit /b 1
+) else if /i "!BUILD_CONFIG!"=="debug" (
+    call :clean_one Debug
+    if errorlevel 1 exit /b 1
+) else (
+    call :clean_one Release
+    if errorlevel 1 exit /b 1
+)
+echo [Brotli] Requested clean completed successfully.
+exit /b 0
+
+:set_action
+if "!ACTION_EXPLICIT!"=="1" (
+    if /i not "!ACTION!"=="%~1" (
+        echo ERROR: Multiple actions were specified: !ACTION! and %~1.
+        exit /b 1
+    )
+)
+set "ACTION=%~1"
+set "ACTION_EXPLICIT=1"
 exit /b 0
 
 :require_tool
@@ -216,14 +265,10 @@ set "CURRENT_CONFIG_LOWER=%~1"
 if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
 if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
 
-set "CURRENT_ROOT=!BROTLI_BUILD_ROOT!\x64-!CURRENT_CONFIG_LOWER!"
+set "CURRENT_CONFIG_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!"
+set "CURRENT_ROOT=!CURRENT_CONFIG_ROOT!\build\brotli"
 set "CURRENT_WORK=!CURRENT_ROOT!\work"
 set "CURRENT_STAGE=!CURRENT_ROOT!\stage"
-
-if "!CLEAN_BUILD!"=="1" (
-    call :remove_exact_directory "!CURRENT_ROOT!" "!CURRENT_ROOT!"
-    if errorlevel 1 exit /b 1
-)
 
 if not exist "!CURRENT_WORK!" mkdir "!CURRENT_WORK!"
 if errorlevel 1 (
@@ -255,18 +300,10 @@ if errorlevel 1 (
 )
 
 echo.
-echo [Brotli] Building !CURRENT_CONFIG! x64...
-cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel
+echo [Brotli] Building !CURRENT_CONFIG! x64 product targets...
+cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel --target brotlicommon brotlidec brotlienc
 if errorlevel 1 (
     echo ERROR: Brotli !CURRENT_CONFIG! build failed.
-    exit /b 1
-)
-
-echo.
-echo [Brotli] Running !CURRENT_CONFIG! shared-library smoke test...
-ctest --test-dir "!CURRENT_WORK!" -C !CURRENT_CONFIG! --output-on-failure
-if errorlevel 1 (
-    echo ERROR: Brotli !CURRENT_CONFIG! shared-library smoke test failed.
     exit /b 1
 )
 
@@ -286,8 +323,58 @@ if errorlevel 1 exit /b 1
 call :verify_stage !CURRENT_CONFIG! !CURRENT_CONFIG_LOWER! "!CURRENT_STAGE!"
 if errorlevel 1 exit /b 1
 
-echo [Brotli] !CURRENT_CONFIG! build, smoke test, stage, and verification completed.
+echo [Brotli] !CURRENT_CONFIG! minimal build, stage, and verification completed.
 exit /b 0
+
+:test_one
+set "CURRENT_CONFIG=%~1"
+set "CURRENT_CONFIG_LOWER=%~1"
+if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
+if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\brotli"
+set "CURRENT_WORK=!CURRENT_ROOT!\work"
+set "CURRENT_STAGE=!CURRENT_ROOT!\stage"
+
+if not exist "!CURRENT_WORK!\CMakeCache.txt" (
+    echo ERROR: Brotli !CURRENT_CONFIG! has not been configured.
+    echo Run: third_party\brotli\build.cmd build !CURRENT_CONFIG_LOWER!
+    exit /b 1
+)
+call :verify_stage !CURRENT_CONFIG! !CURRENT_CONFIG_LOWER! "!CURRENT_STAGE!"
+if errorlevel 1 (
+    echo ERROR: Brotli !CURRENT_CONFIG! staged product is missing or invalid.
+    echo Run: third_party\brotli\build.cmd build !CURRENT_CONFIG_LOWER!
+    exit /b 1
+)
+
+echo.
+echo [Brotli] Building !CURRENT_CONFIG! test-only target...
+cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel --target brotli_shared_smoke
+if errorlevel 1 (
+    echo ERROR: Brotli !CURRENT_CONFIG! smoke target build failed.
+    exit /b 1
+)
+
+echo [Brotli] Running !CURRENT_CONFIG! shared-library smoke test...
+ctest --test-dir "!CURRENT_WORK!" -C !CURRENT_CONFIG! -R "^brotli\.shared\.smoke$" --output-on-failure
+if errorlevel 1 (
+    echo ERROR: Brotli !CURRENT_CONFIG! shared-library smoke test failed.
+    exit /b 1
+)
+
+call :write_test_manifest !CURRENT_CONFIG! "!CURRENT_STAGE!"
+if errorlevel 1 exit /b 1
+echo [Brotli] !CURRENT_CONFIG! test completed; product artifacts were not reinstalled.
+exit /b 0
+
+:clean_one
+set "CURRENT_CONFIG=%~1"
+set "CURRENT_CONFIG_LOWER=%~1"
+if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
+if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\brotli"
+call :remove_exact_directory "!CURRENT_ROOT!" "!CURRENT_ROOT!"
+exit /b !ERRORLEVEL!
 
 :write_manifest
 set "MANIFEST_CONFIG=%~1"
@@ -323,10 +410,9 @@ for %%L in (brotlicommon brotlidec brotlienc) do (
 >>"!MANIFEST_FILE!" echo Static package targets: OFF
 >>"!MANIFEST_FILE!" echo Brotli CLI: OFF
 >>"!MANIFEST_FILE!" echo BROTLI_BUNDLED_MODE: OFF
->>"!MANIFEST_FILE!" echo Project shared smoke test: passed
+>>"!MANIFEST_FILE!" echo Project shared smoke test: not run
 >>"!MANIFEST_FILE!" echo Upstream CLI tests: not run
->>"!MANIFEST_FILE!" echo Encoder runtime version: !EXPECTED_BROTLI_VERSION!
->>"!MANIFEST_FILE!" echo Decoder runtime version: !EXPECTED_BROTLI_VERSION!
+>>"!MANIFEST_FILE!" echo Runtime version verification: not run
 >>"!MANIFEST_FILE!" echo brotlicommon.dll SHA-256: !brotlicommon_DLL_SHA256!
 >>"!MANIFEST_FILE!" echo brotlicommon.pdb SHA-256: !brotlicommon_PDB_SHA256!
 >>"!MANIFEST_FILE!" echo brotlicommon.lib SHA-256: !brotlicommon_LIB_SHA256!
@@ -338,6 +424,28 @@ for %%L in (brotlicommon brotlidec brotlienc) do (
 >>"!MANIFEST_FILE!" echo brotlienc.lib SHA-256: !brotlienc_LIB_SHA256!
 if errorlevel 1 (
     echo ERROR: Failed to write Brotli build manifest: !MANIFEST_FILE!
+    exit /b 1
+)
+exit /b 0
+
+:write_test_manifest
+set "TEST_CONFIG=%~1"
+set "TEST_STAGE=%~2"
+set "TEST_BUILD_MANIFEST=!TEST_STAGE!\build-manifest.txt"
+set "TEST_MANIFEST=!TEST_STAGE!\test-manifest.txt"
+call :calculate_sha256 "!TEST_BUILD_MANIFEST!" BUILD_MANIFEST_SHA256
+if errorlevel 1 exit /b 1
+
+>"!TEST_MANIFEST!" echo Brotli tag: !EXPECTED_BROTLI_TAG!
+>>"!TEST_MANIFEST!" echo Brotli commit: !BROTLI_COMMIT!
+>>"!TEST_MANIFEST!" echo Configuration: !TEST_CONFIG!
+>>"!TEST_MANIFEST!" echo Build manifest SHA-256: !BUILD_MANIFEST_SHA256!
+>>"!TEST_MANIFEST!" echo Project shared smoke test: passed
+>>"!TEST_MANIFEST!" echo Encoder runtime version: !EXPECTED_BROTLI_VERSION!
+>>"!TEST_MANIFEST!" echo Decoder runtime version: !EXPECTED_BROTLI_VERSION!
+>>"!TEST_MANIFEST!" echo Upstream CLI tests: not run
+if errorlevel 1 (
+    echo ERROR: Failed to write Brotli test manifest: !TEST_MANIFEST!
     exit /b 1
 )
 exit /b 0
@@ -426,9 +534,9 @@ if errorlevel 1 (
     echo ERROR: Brotli stage manifest has an unexpected Windows SDK.
     exit /b 1
 )
-findstr /x /c:"Project shared smoke test: passed" "!VERIFY_STAGE!\build-manifest.txt" >nul
+findstr /x /c:"Project shared smoke test: not run" "!VERIFY_STAGE!\build-manifest.txt" >nul
 if errorlevel 1 (
-    echo ERROR: Brotli stage manifest does not record a passed shared smoke test.
+    echo ERROR: Brotli build manifest has an unexpected test status.
     exit /b 1
 )
 
@@ -602,27 +710,27 @@ exit /b 0
 echo SQLiteBrowser Brotli 1.2.0 Windows x64 build script
 echo.
 echo Usage:
-echo   third_party\brotli\build.cmd [all^|debug^|release] [clean]
-echo   third_party\brotli\build.cmd [all^|debug^|release] check
+echo   third_party\brotli\build.cmd check
+echo   third_party\brotli\build.cmd build [all^|debug^|release]
+echo   third_party\brotli\build.cmd test [all^|debug^|release]
+echo   third_party\brotli\build.cmd clean [all^|debug^|release]
+echo   third_party\brotli\build.cmd [all^|debug^|release]
 echo   third_party\brotli\build.cmd --help
 echo.
 echo Defaults:
-echo   all
+echo   build all
 echo.
-echo Build selection:
-echo   all       Build, test, stage, and verify Debug and Release.
-echo   debug     Build, test, stage, and verify Debug only.
-echo   release   Build, test, stage, and verify Release only.
-echo.
-echo Other options:
-echo   clean     Remove the selected Brotli work and stage directories before building.
-echo   check     Validate source and toolchain without building.
+echo Actions:
+echo   build     Build only Brotli DLL product targets, stage, and verify them.
+echo   test      Build the excluded smoke target, run it, and write test-manifest.txt.
+echo   clean     Remove only the selected Brotli private build directory.
+echo   check     Validate source and toolchain without generating output.
 echo.
 echo Stage directories:
-echo   build\brotli\x64-debug\stage
-echo   build\brotli\x64-release\stage
+echo   output\x64-shared-debug\build\brotli\stage
+echo   output\x64-shared-release\build\brotli\stage
 echo.
-echo Every build runs the project-owned shared-library smoke test.
+echo The build action does not compile or run the project-owned smoke test.
 echo Upstream CLI tools, CLI tests, and static package targets are disabled.
 exit /b 0
 

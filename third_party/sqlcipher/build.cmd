@@ -6,8 +6,7 @@ for %%I in ("%SCRIPT_DIR%..\..") do set "PROJECT_ROOT=%%~fI"
 for %%I in ("%SCRIPT_DIR%.") do set "SQLCIPHER_CMAKE_DIR=%%~fI"
 
 set "SQLCIPHER_SRC=%SCRIPT_DIR%src"
-set "SQLCIPHER_BUILD_ROOT=%PROJECT_ROOT%\build\sqlcipher"
-set "OPENSSL_BUILD_ROOT=%PROJECT_ROOT%\build\openssl"
+set "OUTPUT_ROOT=%PROJECT_ROOT%\output"
 set "EXPECTED_SQLCIPHER_COMMIT=63697beb0fafcb61faa7a3e6fd267036548ab11b"
 set "EXPECTED_SQLCIPHER_TAG=v4.18.0"
 set "EXPECTED_SQLITE_VERSION=3.53.4"
@@ -15,25 +14,33 @@ set "EXPECTED_OPENSSL_COMMIT=8cf17aaeb4599f8af87fefd810b5b5fee90fe69e"
 set "EXPECTED_OPENSSL_TAG=openssl-3.5.7"
 set "EXPECTED_BROTLI_COMMIT=028fb5a23661f123017c060daa546b55cf4bde29"
 set "EXPECTED_BROTLI_TAG=v1.2.0"
-set "REQUIRED_WINDOWS_SDK=10.0.22621.0"
+set "REQUIRED_WINDOWS_SDK=10.0.26100.0"
 
+set "ACTION=build"
+set "ACTION_EXPLICIT=0"
 set "BUILD_CONFIG=all"
-set "CLEAN_BUILD=0"
-set "CHECK_ONLY=0"
 
 :parse_arguments
 if "%~1"=="" goto arguments_parsed
 
-if /i "%~1"=="all" (
+if /i "%~1"=="build" (
+    call :set_action build
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="test" (
+    call :set_action test
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="clean" (
+    call :set_action clean
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="check" (
+    call :set_action check
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="all" (
     set "BUILD_CONFIG=all"
 ) else if /i "%~1"=="debug" (
     set "BUILD_CONFIG=debug"
 ) else if /i "%~1"=="release" (
     set "BUILD_CONFIG=release"
-) else if /i "%~1"=="clean" (
-    set "CLEAN_BUILD=1"
-) else if /i "%~1"=="check" (
-    set "CHECK_ONLY=1"
 ) else if /i "%~1"=="--help" (
     goto show_help
 ) else if /i "%~1"=="-h" (
@@ -50,11 +57,6 @@ shift
 goto parse_arguments
 
 :arguments_parsed
-if "!CHECK_ONLY!"=="1" if "!CLEAN_BUILD!"=="1" (
-    echo ERROR: check and clean cannot be used together.
-    exit /b 1
-)
-
 set "LC_ALL=C"
 set "LANG=C"
 set "LANGUAGE="
@@ -62,24 +64,29 @@ set "VSCMD_SKIP_SENDTELEMETRY=1"
 
 echo [SQLCipher] Project root:  !PROJECT_ROOT!
 echo [SQLCipher] Source:        !SQLCIPHER_SRC!
+echo [SQLCipher] Action:        !ACTION!
 echo [SQLCipher] Configuration: !BUILD_CONFIG!
-if "!CLEAN_BUILD!"=="1" echo [SQLCipher] Clean rebuild: yes
-if "!CHECK_ONLY!"=="1" echo [SQLCipher] Check only: yes
 echo.
+
+if /i "!ACTION!"=="clean" goto dispatch_clean
 
 call :require_tool git.exe "Install Git and add git.exe to PATH."
 if errorlevel 1 exit /b 1
 call :require_tool cmake.exe "Install CMake 3.22 or newer and add cmake.exe to PATH."
 if errorlevel 1 exit /b 1
-call :require_tool ctest.exe "Install CMake with CTest and add ctest.exe to PATH."
-if errorlevel 1 exit /b 1
-call :require_tool certutil.exe "Windows certutil.exe is required to calculate SHA-256 values."
-if errorlevel 1 exit /b 1
+if /i "!ACTION!"=="test" (
+    call :require_tool ctest.exe "Install CMake with CTest and add ctest.exe to PATH."
+    if errorlevel 1 exit /b 1
+)
+if /i not "!ACTION!"=="check" (
+    call :require_tool certutil.exe "Windows certutil.exe is required to calculate SHA-256 values."
+    if errorlevel 1 exit /b 1
+)
 call :check_cmake_version
 if errorlevel 1 exit /b 1
 
 if not exist "!SQLCIPHER_SRC!\Makefile.msc" (
-    if "!CHECK_ONLY!"=="1" (
+    if /i not "!ACTION!"=="build" (
         echo ERROR: The SQLCipher submodule is not initialised: !SQLCIPHER_SRC!
         echo Run: git submodule update --init --recursive
         exit /b 1
@@ -195,10 +202,12 @@ echo [SQLCipher] MSVC tools: !VCToolsVersion!
 echo [SQLCipher] Windows SDK: !WINDOWS_SDK_ACTUAL!
 echo [SQLCipher] CMake: !CMAKE_VERSION!
 
-if "!CHECK_ONLY!"=="1" (
+if /i "!ACTION!"=="check" (
     echo [SQLCipher] Environment check completed successfully. No build was performed.
     exit /b 0
 )
+
+if /i "!ACTION!"=="test" goto dispatch_test
 
 if /i "!BUILD_CONFIG!"=="all" (
     call :build_one Debug
@@ -214,9 +223,43 @@ if /i "!BUILD_CONFIG!"=="all" (
 )
 
 echo.
-echo [SQLCipher] Requested build completed successfully.
-echo [SQLCipher] Build root: !SQLCIPHER_BUILD_ROOT!
-echo [SQLCipher] NOTE: CTest and product smoke checks passed; the Tcl SQLCipher suite was not run.
+echo [SQLCipher] Requested minimal product build completed successfully.
+echo [SQLCipher] Output root: !OUTPUT_ROOT!
+echo [SQLCipher] Tests were not built or run. Use: third_party\sqlcipher\build.cmd test !BUILD_CONFIG!
+exit /b 0
+
+:dispatch_test
+if /i "!BUILD_CONFIG!"=="all" (
+    call :test_one Debug
+    if errorlevel 1 exit /b 1
+    call :test_one Release
+    if errorlevel 1 exit /b 1
+) else if /i "!BUILD_CONFIG!"=="debug" (
+    call :test_one Debug
+    if errorlevel 1 exit /b 1
+) else (
+    call :test_one Release
+    if errorlevel 1 exit /b 1
+)
+echo.
+echo [SQLCipher] Requested provider smoke tests completed successfully.
+echo [SQLCipher] NOTE: The Tcl SQLCipher suite was not run.
+exit /b 0
+
+:dispatch_clean
+if /i "!BUILD_CONFIG!"=="all" (
+    call :clean_one Debug
+    if errorlevel 1 exit /b 1
+    call :clean_one Release
+    if errorlevel 1 exit /b 1
+) else if /i "!BUILD_CONFIG!"=="debug" (
+    call :clean_one Debug
+    if errorlevel 1 exit /b 1
+) else (
+    call :clean_one Release
+    if errorlevel 1 exit /b 1
+)
+echo [SQLCipher] Requested build directories were cleaned successfully.
 exit /b 0
 
 :build_one
@@ -225,15 +268,10 @@ set "CURRENT_CONFIG_LOWER=%~1"
 if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
 if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
 
-set "CURRENT_ROOT=!SQLCIPHER_BUILD_ROOT!\x64-!CURRENT_CONFIG_LOWER!"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\sqlcipher"
 set "CURRENT_WORK=!CURRENT_ROOT!\work"
 set "CURRENT_STAGE=!CURRENT_ROOT!\stage"
-set "CURRENT_OPENSSL=!OPENSSL_BUILD_ROOT!\x64-!CURRENT_CONFIG_LOWER!\stage"
-
-if "!CLEAN_BUILD!"=="1" (
-    call :remove_exact_directory "!CURRENT_ROOT!" "!CURRENT_ROOT!"
-    if errorlevel 1 exit /b 1
-)
+set "CURRENT_OPENSSL=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\openssl\stage"
 if not exist "!CURRENT_WORK!" mkdir "!CURRENT_WORK!"
 if errorlevel 1 (
     echo ERROR: Failed to create SQLCipher work directory: !CURRENT_WORK!
@@ -268,18 +306,10 @@ if errorlevel 1 (
 )
 
 echo.
-echo [SQLCipher] Building !CURRENT_CONFIG! with CMake/MSBuild...
-cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel
+echo [SQLCipher] Building !CURRENT_CONFIG! product target only...
+cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel --target sqlcipher
 if errorlevel 1 (
     echo ERROR: SQLCipher !CURRENT_CONFIG! build failed.
-    exit /b 1
-)
-
-echo.
-echo [SQLCipher] Running !CURRENT_CONFIG! CTest provider smoke test...
-ctest --test-dir "!CURRENT_WORK!" -C !CURRENT_CONFIG! --output-on-failure
-if errorlevel 1 (
-    echo ERROR: SQLCipher !CURRENT_CONFIG! CTest provider smoke test failed.
     exit /b 1
 )
 
@@ -288,32 +318,111 @@ if errorlevel 1 exit /b 1
 
 echo.
 echo [SQLCipher] Installing !CURRENT_CONFIG! stage...
-cmake --install "!CURRENT_WORK!" --config !CURRENT_CONFIG! --prefix "!CURRENT_STAGE!"
+cmake --install "!CURRENT_WORK!" --config !CURRENT_CONFIG! --prefix "!CURRENT_STAGE!" --component SQLCipherProduct
 if errorlevel 1 (
     echo ERROR: SQLCipher !CURRENT_CONFIG! stage installation failed.
     exit /b 1
 )
 
-call :run_runtime_probes "!CURRENT_CONFIG!" "!CURRENT_STAGE!" "!CURRENT_OPENSSL!"
-if errorlevel 1 exit /b 1
 call :write_manifest "!CURRENT_CONFIG!" "!CURRENT_STAGE!" "!CURRENT_OPENSSL!" "!CURRENT_WORK!"
 if errorlevel 1 exit /b 1
 call :verify_stage "!CURRENT_CONFIG!" "!CURRENT_STAGE!"
 if errorlevel 1 exit /b 1
 
-echo [SQLCipher] !CURRENT_CONFIG! build, CTest, stage, and verification completed.
+echo [SQLCipher] !CURRENT_CONFIG! minimal product build, stage, and verification completed.
 exit /b 0
+
+:test_one
+set "CURRENT_CONFIG=%~1"
+set "CURRENT_CONFIG_LOWER=%~1"
+if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
+if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\sqlcipher"
+set "CURRENT_WORK=!CURRENT_ROOT!\work"
+set "CURRENT_STAGE=!CURRENT_ROOT!\stage"
+set "CURRENT_OPENSSL=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\openssl\stage"
+set "CURRENT_TEST_RESULTS=!CURRENT_WORK!\test-results"
+set "CURRENT_CLI=!CURRENT_WORK!\!CURRENT_CONFIG!\sqlcipher.exe"
+
+if not exist "!CURRENT_WORK!\CMakeCache.txt" (
+    echo ERROR: SQLCipher !CURRENT_CONFIG! has not been configured.
+    echo Run: third_party\sqlcipher\build.cmd build !CURRENT_CONFIG_LOWER!
+    exit /b 1
+)
+call :verify_stage "!CURRENT_CONFIG!" "!CURRENT_STAGE!"
+if errorlevel 1 (
+    echo ERROR: SQLCipher !CURRENT_CONFIG! product stage is missing or invalid.
+    echo Run: third_party\sqlcipher\build.cmd build !CURRENT_CONFIG_LOWER!
+    exit /b 1
+)
+if exist "!CURRENT_STAGE!\test-manifest.txt" del /q "!CURRENT_STAGE!\test-manifest.txt"
+if exist "!CURRENT_STAGE!\test-manifest.txt" (
+    echo ERROR: Failed to remove the stale SQLCipher test manifest.
+    exit /b 1
+)
+
+echo.
+echo [SQLCipher] Building !CURRENT_CONFIG! test-only CLI target...
+cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel --target sqlcipher_cli
+if errorlevel 1 (
+    echo ERROR: SQLCipher !CURRENT_CONFIG! test-only CLI build failed.
+    exit /b 1
+)
+if not exist "!CURRENT_CLI!" (
+    echo ERROR: SQLCipher !CURRENT_CONFIG! test CLI is missing: !CURRENT_CLI!
+    exit /b 1
+)
+
+echo [SQLCipher] Running !CURRENT_CONFIG! CTest provider smoke test...
+ctest --test-dir "!CURRENT_WORK!" -C !CURRENT_CONFIG! --output-on-failure
+if errorlevel 1 (
+    echo ERROR: SQLCipher !CURRENT_CONFIG! CTest provider smoke test failed.
+    exit /b 1
+)
+
+call :remove_exact_directory "!CURRENT_TEST_RESULTS!" "!CURRENT_TEST_RESULTS!"
+if errorlevel 1 exit /b 1
+mkdir "!CURRENT_TEST_RESULTS!"
+if errorlevel 1 (
+    echo ERROR: Failed to create SQLCipher test-results directory: !CURRENT_TEST_RESULTS!
+    exit /b 1
+)
+copy /y "!CURRENT_CLI!" "!CURRENT_TEST_RESULTS!\sqlcipher-provider-smoke.exe" >nul
+if errorlevel 1 (
+    echo ERROR: Failed to prepare the staged-product provider smoke executable.
+    exit /b 1
+)
+
+call :run_runtime_probes "!CURRENT_CONFIG!" "!CURRENT_TEST_RESULTS!\sqlcipher-provider-smoke.exe" "!CURRENT_TEST_RESULTS!" "!CURRENT_STAGE!" "!CURRENT_OPENSSL!"
+if errorlevel 1 exit /b 1
+call :write_test_manifest "!CURRENT_CONFIG!" "!CURRENT_STAGE!" "!CURRENT_TEST_RESULTS!"
+if errorlevel 1 exit /b 1
+call :verify_test_result "!CURRENT_CONFIG!" "!CURRENT_STAGE!" "!CURRENT_TEST_RESULTS!"
+if errorlevel 1 exit /b 1
+echo [SQLCipher] !CURRENT_CONFIG! provider smoke and staged-product probes completed.
+exit /b 0
+
+:clean_one
+set "CURRENT_CONFIG=%~1"
+set "CURRENT_CONFIG_LOWER=%~1"
+if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
+if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\sqlcipher"
+call :remove_exact_directory "!CURRENT_ROOT!" "!CURRENT_ROOT!"
+exit /b !ERRORLEVEL!
 
 :run_runtime_probes
 set "PROBE_CONFIG=%~1"
-set "PROBE_STAGE=%~2"
-set "PROBE_OPENSSL=%~3"
-set "PROBE_OUTPUT=!PROBE_STAGE!\provider-probe.txt"
-set "COMPILE_OUTPUT=!PROBE_STAGE!\compile-options.txt"
+set "PROBE_CLI=%~2"
+set "PROBE_RESULTS=%~3"
+set "PROBE_STAGE=%~4"
+set "PROBE_OPENSSL=%~5"
+set "PROBE_OUTPUT=!PROBE_RESULTS!\provider-probe.txt"
+set "COMPILE_OUTPUT=!PROBE_RESULTS!\compile-options.txt"
 set "SAVED_PATH=!PATH!"
 set "PATH=!PROBE_STAGE!\bin;!PROBE_OPENSSL!\bin;!PATH!"
 
-"!PROBE_STAGE!\bin\sqlcipher.exe" :memory: "PRAGMA key='provider-probe'; PRAGMA cipher_version; PRAGMA cipher_provider; PRAGMA cipher_provider_version;" >"!PROBE_OUTPUT!" 2>&1
+"!PROBE_CLI!" :memory: "PRAGMA key='provider-probe'; PRAGMA cipher_version; PRAGMA cipher_provider; PRAGMA cipher_provider_version;" >"!PROBE_OUTPUT!" 2>&1
 if errorlevel 1 (
     set "PATH=!SAVED_PATH!"
     echo ERROR: Staged SQLCipher provider probe failed.
@@ -328,7 +437,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-"!PROBE_STAGE!\bin\sqlcipher.exe" :memory: "PRAGMA key='compile-probe'; PRAGMA compile_options;" >"!COMPILE_OUTPUT!" 2>&1
+"!PROBE_CLI!" :memory: "PRAGMA key='compile-probe'; PRAGMA compile_options;" >"!COMPILE_OUTPUT!" 2>&1
 set "PATH=!SAVED_PATH!"
 if errorlevel 1 (
     echo ERROR: SQLCipher compile-options probe failed.
@@ -377,8 +486,6 @@ if /i "!MANIFEST_CONFIG!"=="Debug" set "MANIFEST_CRT=/MDd"
 
 call :calculate_sha256 "!MANIFEST_STAGE!\bin\sqlcipher.dll" SQLCIPHER_DLL_SHA256
 if errorlevel 1 exit /b 1
-call :calculate_sha256 "!MANIFEST_STAGE!\bin\sqlcipher.exe" SQLCIPHER_EXE_SHA256
-if errorlevel 1 exit /b 1
 call :calculate_sha256 "!MANIFEST_STAGE!\lib\sqlcipher.lib" SQLCIPHER_LIB_SHA256
 if errorlevel 1 exit /b 1
 call :calculate_sha256 "!MANIFEST_OPENSSL!\build-manifest.txt" OPENSSL_MANIFEST_SHA256
@@ -402,13 +509,14 @@ if errorlevel 1 exit /b 1
 >>"!MANIFEST_FILE!" echo Brotli tag: !EXPECTED_BROTLI_TAG!
 >>"!MANIFEST_FILE!" echo Brotli commit: !EXPECTED_BROTLI_COMMIT!
 >>"!MANIFEST_FILE!" echo Brotli contract: dynamically loaded by the matching OpenSSL stage
->>"!MANIFEST_FILE!" echo CTest provider smoke: passed
->>"!MANIFEST_FILE!" echo Product runtime probes: passed
+>>"!MANIFEST_FILE!" echo Product target: sqlcipher
+>>"!MANIFEST_FILE!" echo Test-only target: sqlcipher_cli ^(excluded from default build^)
+>>"!MANIFEST_FILE!" echo CTest provider smoke: not run
+>>"!MANIFEST_FILE!" echo Product runtime probes: not run
 >>"!MANIFEST_FILE!" echo Tcl SQLCipher test suite: not run
->>"!MANIFEST_FILE!" echo Linker PDBs: bin/sqlcipher.pdb;bin/sqlcipher-cli.pdb
+>>"!MANIFEST_FILE!" echo Linker PDBs: bin/sqlcipher.pdb
 >>"!MANIFEST_FILE!" echo PDB policy: linker PDBs staged beside runtime binaries; generator and compiler PDBs excluded
 >>"!MANIFEST_FILE!" echo sqlcipher.dll SHA-256: !SQLCIPHER_DLL_SHA256!
->>"!MANIFEST_FILE!" echo sqlcipher.exe SHA-256: !SQLCIPHER_EXE_SHA256!
 >>"!MANIFEST_FILE!" echo sqlcipher.lib SHA-256: !SQLCIPHER_LIB_SHA256!
 for /f "usebackq delims=" %%L in ("!MANIFEST_WORK!\sqlcipher-build-settings.txt") do >>"!MANIFEST_FILE!" echo %%L
 exit /b 0
@@ -419,17 +527,13 @@ set "VERIFY_STAGE=%~2"
 
 for %%F in (
     "!VERIFY_STAGE!\bin\sqlcipher.dll"
-    "!VERIFY_STAGE!\bin\sqlcipher.exe"
     "!VERIFY_STAGE!\include\sqlcipher\sqlite3.h"
     "!VERIFY_STAGE!\include\sqlcipher\sqlite3ext.h"
     "!VERIFY_STAGE!\include\sqlcipher\sqlite3session.h"
     "!VERIFY_STAGE!\lib\sqlcipher.lib"
     "!VERIFY_STAGE!\bin\sqlcipher.pdb"
-    "!VERIFY_STAGE!\bin\sqlcipher-cli.pdb"
     "!VERIFY_STAGE!\share\licenses\sqlcipher\LICENSE.md"
     "!VERIFY_STAGE!\share\licenses\sqlcipher\SQLITE_LICENSE.md"
-    "!VERIFY_STAGE!\provider-probe.txt"
-    "!VERIFY_STAGE!\compile-options.txt"
     "!VERIFY_STAGE!\build-manifest.txt"
 ) do if not exist "%%~fF" (
     echo ERROR: Expected staged artifact is missing: %%~fF
@@ -444,6 +548,8 @@ findstr /x /c:"Configuration: !VERIFY_CONFIG!" "!VERIFY_STAGE!\build-manifest.tx
 if errorlevel 1 exit /b 1
 findstr /x /c:"Build system: CMake/MSBuild (Makefile.msc source generation only)" "!VERIFY_STAGE!\build-manifest.txt" >nul
 if errorlevel 1 exit /b 1
+findstr /x /c:"CTest provider smoke: not run" "!VERIFY_STAGE!\build-manifest.txt" >nul
+if errorlevel 1 exit /b 1
 
 dumpbin /headers "!VERIFY_STAGE!\bin\sqlcipher.dll" | findstr /i /c:"8664 machine (x64)" >nul
 if errorlevel 1 (
@@ -455,12 +561,6 @@ if errorlevel 1 (
     echo ERROR: sqlcipher.dll does not depend on libcrypto-3-x64.dll.
     exit /b 1
 )
-dumpbin /dependents "!VERIFY_STAGE!\bin\sqlcipher.exe" | findstr /i /c:"sqlcipher.dll" >nul
-if errorlevel 1 (
-    echo ERROR: sqlcipher.exe is not dynamically linked to sqlcipher.dll.
-    exit /b 1
-)
-
 dumpbin /dependents "!VERIFY_STAGE!\bin\sqlcipher.dll" | findstr /i /c:"VCRUNTIME140D.dll" /c:"VCRUNTIME140_1D.dll" /c:"ucrtbased.dll" >nul
 if /i "!VERIFY_CONFIG!"=="Release" (
     if not errorlevel 1 (
@@ -486,6 +586,18 @@ for %%F in (libcrypto-3-x64.dll libssl-3-x64.dll brotlicommon.dll brotlidec.dll 
     echo ERROR: Dependency runtime leaked into the SQLCipher-only stage: %%F
     exit /b 1
 )
+for %%F in (sqlcipher.exe sqlcipher-cli.pdb provider-probe.txt compile-options.txt) do if exist "!VERIFY_STAGE!\%%F" (
+    echo ERROR: Test-only artifact leaked into the SQLCipher product stage: %%F
+    exit /b 1
+)
+if exist "!VERIFY_STAGE!\bin\sqlcipher.exe" (
+    echo ERROR: Test-only SQLCipher CLI leaked into the product stage.
+    exit /b 1
+)
+if exist "!VERIFY_STAGE!\bin\sqlcipher-cli.pdb" (
+    echo ERROR: Test-only SQLCipher CLI PDB leaked into the product stage.
+    exit /b 1
+)
 for %%P in (vc140.pdb vc143.pdb lemon.pdb mkkeywordhash.pdb mksourceid.pdb src-verify.pdb) do (
     dir /s /b "!VERIFY_STAGE!\%%P" >nul 2>&1
     if not errorlevel 1 (
@@ -495,13 +607,67 @@ for %%P in (vc140.pdb vc143.pdb lemon.pdb mkkeywordhash.pdb mksourceid.pdb src-v
 )
 exit /b 0
 
+:write_test_manifest
+set "TEST_CONFIG=%~1"
+set "TEST_STAGE=%~2"
+set "TEST_RESULTS=%~3"
+set "TEST_MANIFEST=!TEST_STAGE!\test-manifest.txt"
+call :calculate_sha256 "!TEST_STAGE!\build-manifest.txt" BUILD_MANIFEST_SHA256
+if errorlevel 1 exit /b 1
+call :calculate_sha256 "!TEST_RESULTS!\provider-probe.txt" PROVIDER_PROBE_SHA256
+if errorlevel 1 exit /b 1
+call :calculate_sha256 "!TEST_RESULTS!\compile-options.txt" COMPILE_OPTIONS_SHA256
+if errorlevel 1 exit /b 1
+
+>"!TEST_MANIFEST!" echo SQLCipher tag: !EXPECTED_SQLCIPHER_TAG!
+>>"!TEST_MANIFEST!" echo SQLCipher commit: !SQLCIPHER_COMMIT!
+>>"!TEST_MANIFEST!" echo Configuration: !TEST_CONFIG!
+>>"!TEST_MANIFEST!" echo Build manifest SHA-256: !BUILD_MANIFEST_SHA256!
+>>"!TEST_MANIFEST!" echo Test-only target: sqlcipher_cli
+>>"!TEST_MANIFEST!" echo CTest provider smoke: passed
+>>"!TEST_MANIFEST!" echo Staged-product provider probe: passed
+>>"!TEST_MANIFEST!" echo Staged-product compile-options probe: passed
+>>"!TEST_MANIFEST!" echo Tcl SQLCipher test suite: not run
+>>"!TEST_MANIFEST!" echo Test results directory: !TEST_RESULTS!
+>>"!TEST_MANIFEST!" echo provider-probe.txt SHA-256: !PROVIDER_PROBE_SHA256!
+>>"!TEST_MANIFEST!" echo compile-options.txt SHA-256: !COMPILE_OPTIONS_SHA256!
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:verify_test_result
+set "VERIFY_TEST_CONFIG=%~1"
+set "VERIFY_TEST_STAGE=%~2"
+set "VERIFY_TEST_RESULTS=%~3"
+for %%F in (
+    "!VERIFY_TEST_STAGE!\test-manifest.txt"
+    "!VERIFY_TEST_RESULTS!\sqlcipher-provider-smoke.exe"
+    "!VERIFY_TEST_RESULTS!\provider-probe.txt"
+    "!VERIFY_TEST_RESULTS!\compile-options.txt"
+) do if not exist "%%~fF" (
+    echo ERROR: Expected SQLCipher test artifact is missing: %%~fF
+    exit /b 1
+)
+call :calculate_sha256 "!VERIFY_TEST_STAGE!\build-manifest.txt" CURRENT_BUILD_MANIFEST_SHA256
+if errorlevel 1 exit /b 1
+findstr /x /c:"Configuration: !VERIFY_TEST_CONFIG!" "!VERIFY_TEST_STAGE!\test-manifest.txt" >nul
+if errorlevel 1 exit /b 1
+findstr /x /c:"Build manifest SHA-256: !CURRENT_BUILD_MANIFEST_SHA256!" "!VERIFY_TEST_STAGE!\test-manifest.txt" >nul
+if errorlevel 1 (
+    echo ERROR: SQLCipher test manifest does not match the current product build manifest.
+    exit /b 1
+)
+findstr /x /c:"CTest provider smoke: passed" "!VERIFY_TEST_STAGE!\test-manifest.txt" >nul
+if errorlevel 1 exit /b 1
+findstr /x /c:"Staged-product provider probe: passed" "!VERIFY_TEST_STAGE!\test-manifest.txt" >nul
+if errorlevel 1 exit /b 1
+exit /b 0
+
 :check_openssl
 set "OPENSSL_CONFIG=%~1"
-set "OPENSSL_STAGE=!OPENSSL_BUILD_ROOT!\x64-!OPENSSL_CONFIG!\stage"
+set "OPENSSL_STAGE=!OUTPUT_ROOT!\x64-shared-!OPENSSL_CONFIG!\build\openssl\stage"
 set "OPENSSL_MANIFEST=!OPENSSL_STAGE!\build-manifest.txt"
 
 for %%F in (
-    "!OPENSSL_STAGE!\bin\openssl.exe"
     "!OPENSSL_STAGE!\bin\libcrypto-3-x64.dll"
     "!OPENSSL_STAGE!\bin\brotlicommon.dll"
     "!OPENSSL_STAGE!\bin\brotlidec.dll"
@@ -511,13 +677,7 @@ for %%F in (
     "!OPENSSL_MANIFEST!"
 ) do if not exist "%%~fF" (
     echo ERROR: Required !OPENSSL_CONFIG! OpenSSL artifact is missing: %%~fF
-    echo Build it first with: third_party\openssl\build.cmd !OPENSSL_CONFIG! safe
-    exit /b 1
-)
-
-"!OPENSSL_STAGE!\bin\openssl.exe" version | findstr /i /c:"OpenSSL 3.5.7" >nul
-if errorlevel 1 (
-    echo ERROR: The !OPENSSL_CONFIG! OpenSSL stage is not OpenSSL 3.5.7.
+    echo Build it first with: third_party\openssl\build.cmd build !OPENSSL_CONFIG!
     exit /b 1
 )
 
@@ -640,6 +800,15 @@ if not defined VS_ROOT (
 set "VS_DEVCMD=!VS_ROOT!\Common7\Tools\VsDevCmd.bat"
 exit /b 0
 
+:set_action
+if "!ACTION_EXPLICIT!"=="1" if /i not "!ACTION!"=="%~1" (
+    echo ERROR: Multiple actions were specified: !ACTION! and %~1.
+    exit /b 1
+)
+set "ACTION=%~1"
+set "ACTION_EXPLICIT=1"
+exit /b 0
+
 :require_tool
 where.exe "%~1" >nul 2>&1
 if errorlevel 1 (
@@ -653,31 +822,40 @@ exit /b 0
 echo SQLiteBrowser SQLCipher 4.18.0 Windows x64 build script
 echo.
 echo Usage:
-echo   third_party\sqlcipher\build.cmd [all^|debug^|release] [clean]
-echo   third_party\sqlcipher\build.cmd [all^|debug^|release] check
+echo   third_party\sqlcipher\build.cmd [build^|test^|clean^|check] [all^|debug^|release]
+echo   third_party\sqlcipher\build.cmd [all^|debug^|release]
 echo   third_party\sqlcipher\build.cmd --help
 echo.
 echo Defaults:
-echo   all
+echo   build all
 echo.
-echo Build selection:
-echo   all       Build, CTest, stage, and verify Debug and Release.
-echo   debug     Build, CTest, stage, and verify Debug only.
-echo   release   Build, CTest, stage, and verify Release only.
-echo.
-echo Other options:
-echo   clean     Remove the selected configuration work and stage first.
+echo Actions:
+echo   build     Build only sqlcipher.dll, install the product stage, and verify it.
+echo   test      Build the test-only CLI, run CTest and staged-product probes.
+echo   clean     Remove only the selected SQLCipher private build directory.
 echo   check     Validate source, toolchain, and matching OpenSSL/Brotli stage only.
+echo.
+echo Configuration:
+echo   all       Select Debug and Release.
+echo   debug     Select Debug only.
+echo   release   Select Release only.
 echo.
 echo Build model:
 echo   Makefile.msc generates the amalgamation and public sources only.
-echo   CMake/MSBuild compiles and links sqlcipher.dll and sqlcipher.exe.
+echo   build compiles and stages sqlcipher.dll only.
+echo   test compiles sqlcipher.exe only as a private provider-smoke tool.
 echo.
 echo Stage directories:
-echo   build\sqlcipher\x64-debug\stage
-echo   build\sqlcipher\x64-release\stage
+echo   output\x64-shared-debug\build\sqlcipher\stage
+echo   output\x64-shared-release\build\sqlcipher\stage
 echo.
-echo CTest and product smoke checks run for every build. The Tcl SQLCipher suite is not run.
+echo Test result directories:
+echo   output\x64-shared-debug\build\sqlcipher\work\test-results
+echo   output\x64-shared-release\build\sqlcipher\work\test-results
+echo.
+echo build-manifest.txt always records tests as not run. test-manifest.txt binds
+echo successful provider smoke results to the current build manifest. The Tcl
+echo SQLCipher suite is not run by this script.
 exit /b 0
 
 :show_help_error

@@ -6,30 +6,38 @@ for %%I in ("%SCRIPT_DIR%..\..") do set "PROJECT_ROOT=%%~fI"
 for %%I in ("%SCRIPT_DIR%.") do set "ZSTD_CMAKE_DIR=%%~fI"
 
 set "ZSTD_SRC=%SCRIPT_DIR%src"
-set "ZSTD_BUILD_ROOT=%PROJECT_ROOT%\build\zstd"
+set "OUTPUT_ROOT=%PROJECT_ROOT%\output"
 set "EXPECTED_ZSTD_COMMIT=f8745da6ff1ad1e7bab384bd1f9d742439278e99"
 set "EXPECTED_ZSTD_TAG=v1.5.7"
 set "EXPECTED_ZSTD_VERSION=1.5.7"
-set "REQUIRED_WINDOWS_SDK=10.0.22621.0"
+set "REQUIRED_WINDOWS_SDK=10.0.26100.0"
 set "WINDOWS_POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
+set "ACTION=build"
+set "ACTION_EXPLICIT=0"
 set "BUILD_CONFIG=all"
-set "CLEAN_BUILD=0"
-set "CHECK_ONLY=0"
 
 :parse_arguments
 if "%~1"=="" goto arguments_parsed
 
-if /i "%~1"=="all" (
+if /i "%~1"=="build" (
+    call :set_action build
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="test" (
+    call :set_action test
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="clean" (
+    call :set_action clean
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="check" (
+    call :set_action check
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="all" (
     set "BUILD_CONFIG=all"
 ) else if /i "%~1"=="debug" (
     set "BUILD_CONFIG=debug"
 ) else if /i "%~1"=="release" (
     set "BUILD_CONFIG=release"
-) else if /i "%~1"=="clean" (
-    set "CLEAN_BUILD=1"
-) else if /i "%~1"=="check" (
-    set "CHECK_ONLY=1"
 ) else if /i "%~1"=="--help" (
     goto show_help
 ) else if /i "%~1"=="-h" (
@@ -46,11 +54,6 @@ shift
 goto parse_arguments
 
 :arguments_parsed
-if "!CHECK_ONLY!"=="1" if "!CLEAN_BUILD!"=="1" (
-    echo ERROR: check and clean cannot be used together.
-    exit /b 1
-)
-
 set "LC_ALL=C"
 set "LANG=C"
 set "LANGUAGE="
@@ -58,9 +61,8 @@ set "VSCMD_SKIP_SENDTELEMETRY=1"
 
 echo [zstd] Project root:  !PROJECT_ROOT!
 echo [zstd] Source:        !ZSTD_SRC!
+echo [zstd] Action:        !ACTION!
 echo [zstd] Configuration: !BUILD_CONFIG!
-if "!CLEAN_BUILD!"=="1" echo [zstd] Clean rebuild: yes
-if "!CHECK_ONLY!"=="1" echo [zstd] Check only: yes
 echo.
 
 call :require_tool git.exe "Install Git and add git.exe to PATH."
@@ -81,7 +83,7 @@ call :check_cmake_version
 if errorlevel 1 exit /b 1
 
 if not exist "!ZSTD_SRC!\build\cmake\CMakeLists.txt" (
-    if "!CHECK_ONLY!"=="1" (
+    if /i "!ACTION!"=="check" (
         echo ERROR: The zstd submodule is not initialised: !ZSTD_SRC!
         echo Run: git submodule update --init --recursive
         exit /b 1
@@ -180,10 +182,13 @@ echo [zstd] MSVC tools: !VCToolsVersion!
 echo [zstd] Windows SDK: !WINDOWS_SDK_ACTUAL!
 echo [zstd] CMake: !CMAKE_VERSION!
 
-if "!CHECK_ONLY!"=="1" (
+if /i "!ACTION!"=="check" (
     echo [zstd] Environment check completed successfully. No build was performed.
     exit /b 0
 )
+
+if /i "!ACTION!"=="clean" goto dispatch_clean
+if /i "!ACTION!"=="test" goto dispatch_test
 
 if /i "!BUILD_CONFIG!"=="all" (
     call :build_one Debug
@@ -199,8 +204,49 @@ if /i "!BUILD_CONFIG!"=="all" (
 )
 
 echo.
-echo [zstd] Requested build completed successfully.
-echo [zstd] Build root: !ZSTD_BUILD_ROOT!
+echo [zstd] Requested minimal product build completed successfully.
+echo [zstd] Output root: !OUTPUT_ROOT!
+exit /b 0
+
+:dispatch_test
+if /i "!BUILD_CONFIG!"=="all" (
+    call :test_one Debug
+    if errorlevel 1 exit /b 1
+    call :test_one Release
+    if errorlevel 1 exit /b 1
+) else if /i "!BUILD_CONFIG!"=="debug" (
+    call :test_one Debug
+    if errorlevel 1 exit /b 1
+) else (
+    call :test_one Release
+    if errorlevel 1 exit /b 1
+)
+echo [zstd] Requested tests completed successfully.
+exit /b 0
+
+:dispatch_clean
+if /i "!BUILD_CONFIG!"=="all" (
+    call :clean_one Debug
+    if errorlevel 1 exit /b 1
+    call :clean_one Release
+    if errorlevel 1 exit /b 1
+) else if /i "!BUILD_CONFIG!"=="debug" (
+    call :clean_one Debug
+    if errorlevel 1 exit /b 1
+) else (
+    call :clean_one Release
+    if errorlevel 1 exit /b 1
+)
+echo [zstd] Requested clean completed successfully.
+exit /b 0
+
+:set_action
+if "!ACTION_EXPLICIT!"=="1" if /i not "!ACTION!"=="%~1" (
+    echo ERROR: Multiple actions were specified: !ACTION! and %~1.
+    exit /b 1
+)
+set "ACTION=%~1"
+set "ACTION_EXPLICIT=1"
 exit /b 0
 
 :require_tool
@@ -218,14 +264,9 @@ set "CURRENT_CONFIG_LOWER=%~1"
 if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
 if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
 
-set "CURRENT_ROOT=!ZSTD_BUILD_ROOT!\x64-!CURRENT_CONFIG_LOWER!"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\zstd"
 set "CURRENT_WORK=!CURRENT_ROOT!\work"
 set "CURRENT_STAGE=!CURRENT_ROOT!\stage"
-
-if "!CLEAN_BUILD!"=="1" (
-    call :remove_exact_directory "!CURRENT_ROOT!" "!CURRENT_ROOT!"
-    if errorlevel 1 exit /b 1
-)
 
 if not exist "!CURRENT_WORK!" mkdir "!CURRENT_WORK!"
 if errorlevel 1 (
@@ -257,18 +298,10 @@ if errorlevel 1 (
 )
 
 echo.
-echo [zstd] Building !CURRENT_CONFIG! x64...
-cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel
+echo [zstd] Building !CURRENT_CONFIG! x64 product target...
+cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel --target libzstd_shared
 if errorlevel 1 (
     echo ERROR: zstd !CURRENT_CONFIG! build failed.
-    exit /b 1
-)
-
-echo.
-echo [zstd] Running !CURRENT_CONFIG! shared-library smoke test...
-ctest --test-dir "!CURRENT_WORK!" -C !CURRENT_CONFIG! --output-on-failure
-if errorlevel 1 (
-    echo ERROR: zstd !CURRENT_CONFIG! shared-library smoke test failed.
     exit /b 1
 )
 
@@ -288,20 +321,58 @@ if errorlevel 1 exit /b 1
 call :verify_stage !CURRENT_CONFIG! !CURRENT_CONFIG_LOWER! "!CURRENT_STAGE!"
 if errorlevel 1 exit /b 1
 
-echo [zstd] !CURRENT_CONFIG! build, smoke test, stage, and verification completed.
+echo [zstd] !CURRENT_CONFIG! minimal build, stage, and verification completed.
 exit /b 0
+
+:test_one
+set "CURRENT_CONFIG=%~1"
+set "CURRENT_CONFIG_LOWER=%~1"
+if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
+if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\zstd"
+set "CURRENT_WORK=!CURRENT_ROOT!\work"
+set "CURRENT_STAGE=!CURRENT_ROOT!\stage"
+if not exist "!CURRENT_WORK!\CMakeCache.txt" (
+    echo ERROR: zstd !CURRENT_CONFIG! has not been configured.
+    echo Run: third_party\zstd\build.cmd build !CURRENT_CONFIG_LOWER!
+    exit /b 1
+)
+call :verify_stage !CURRENT_CONFIG! !CURRENT_CONFIG_LOWER! "!CURRENT_STAGE!"
+if errorlevel 1 exit /b 1
+echo [zstd] Building !CURRENT_CONFIG! test-only target...
+cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel --target zstd_shared_smoke
+if errorlevel 1 exit /b 1
+echo [zstd] Running !CURRENT_CONFIG! shared-library smoke test...
+ctest --test-dir "!CURRENT_WORK!" -C !CURRENT_CONFIG! -R "^zstd\.shared\.smoke$" --output-on-failure
+if errorlevel 1 exit /b 1
+call :write_test_manifest !CURRENT_CONFIG! "!CURRENT_STAGE!"
+if errorlevel 1 exit /b 1
+echo [zstd] !CURRENT_CONFIG! test completed; product artifacts were not reinstalled.
+exit /b 0
+
+:clean_one
+set "CURRENT_CONFIG=%~1"
+set "CURRENT_CONFIG_LOWER=%~1"
+if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
+if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\zstd"
+call :remove_exact_directory "!CURRENT_ROOT!" "!CURRENT_ROOT!"
+exit /b !ERRORLEVEL!
 
 :write_manifest
 set "MANIFEST_CONFIG=%~1"
 set "MANIFEST_CONFIG_LOWER=%~2"
 set "MANIFEST_STAGE=%~3"
 set "MANIFEST_DLL=!MANIFEST_STAGE!\bin\libzstd.dll"
+set "MANIFEST_PDB=!MANIFEST_STAGE!\bin\libzstd.pdb"
 set "MANIFEST_LIB=!MANIFEST_STAGE!\lib\libzstd.lib"
 set "MANIFEST_FILE=!MANIFEST_STAGE!\build-manifest.txt"
 set "MANIFEST_CRT=/MD"
 if /i "!MANIFEST_CONFIG!"=="Debug" set "MANIFEST_CRT=/MDd"
 
 call :calculate_sha256 "!MANIFEST_DLL!" DLL_SHA256
+if errorlevel 1 exit /b 1
+call :calculate_sha256 "!MANIFEST_PDB!" PDB_SHA256
 if errorlevel 1 exit /b 1
 call :calculate_sha256 "!MANIFEST_LIB!" LIB_SHA256
 if errorlevel 1 exit /b 1
@@ -318,6 +389,9 @@ if errorlevel 1 exit /b 1
 >>"!MANIFEST_FILE!" echo Library type: shared
 >>"!MANIFEST_FILE!" echo DLL name: libzstd.dll
 >>"!MANIFEST_FILE!" echo Import library: libzstd.lib
+>>"!MANIFEST_FILE!" echo Linker PDB: libzstd.pdb
+>>"!MANIFEST_FILE!" echo PDB policy: linker PDB staged; compiler PDB excluded
+>>"!MANIFEST_FILE!" echo Release symbol flags: /Zi /DEBUG:FULL /OPT:REF /OPT:ICF
 >>"!MANIFEST_FILE!" echo Compression support: ON
 >>"!MANIFEST_FILE!" echo Decompression support: ON
 >>"!MANIFEST_FILE!" echo Dictionary builder: ON
@@ -327,15 +401,31 @@ if errorlevel 1 exit /b 1
 >>"!MANIFEST_FILE!" echo ZSTD_ZLIB_SUPPORT: OFF
 >>"!MANIFEST_FILE!" echo ZSTD_LZMA_SUPPORT: OFF
 >>"!MANIFEST_FILE!" echo ZSTD_LZ4_SUPPORT: OFF
->>"!MANIFEST_FILE!" echo Project shared smoke test: passed
+>>"!MANIFEST_FILE!" echo Project shared smoke test: not run
 >>"!MANIFEST_FILE!" echo Upstream static tests: not run
->>"!MANIFEST_FILE!" echo Runtime version: !EXPECTED_ZSTD_VERSION!
+>>"!MANIFEST_FILE!" echo Runtime version verification: not run
 >>"!MANIFEST_FILE!" echo libzstd.dll SHA-256: !DLL_SHA256!
+>>"!MANIFEST_FILE!" echo libzstd.pdb SHA-256: !PDB_SHA256!
 >>"!MANIFEST_FILE!" echo libzstd.lib SHA-256: !LIB_SHA256!
 if errorlevel 1 (
     echo ERROR: Failed to write zstd build manifest: !MANIFEST_FILE!
     exit /b 1
 )
+exit /b 0
+
+:write_test_manifest
+set "TEST_CONFIG=%~1"
+set "TEST_STAGE=%~2"
+call :calculate_sha256 "!TEST_STAGE!\build-manifest.txt" BUILD_MANIFEST_SHA256
+if errorlevel 1 exit /b 1
+>"!TEST_STAGE!\test-manifest.txt" echo zstd tag: !EXPECTED_ZSTD_TAG!
+>>"!TEST_STAGE!\test-manifest.txt" echo zstd commit: !ZSTD_COMMIT!
+>>"!TEST_STAGE!\test-manifest.txt" echo Configuration: !TEST_CONFIG!
+>>"!TEST_STAGE!\test-manifest.txt" echo Build manifest SHA-256: !BUILD_MANIFEST_SHA256!
+>>"!TEST_STAGE!\test-manifest.txt" echo Project shared smoke test: passed
+>>"!TEST_STAGE!\test-manifest.txt" echo Runtime version: !EXPECTED_ZSTD_VERSION!
+>>"!TEST_STAGE!\test-manifest.txt" echo Upstream static tests: not run
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :calculate_sha256
@@ -378,6 +468,7 @@ set "VERIFY_STAGE=%~3"
 
 for %%F in (
     "!VERIFY_STAGE!\bin\libzstd.dll"
+    "!VERIFY_STAGE!\bin\libzstd.pdb"
     "!VERIFY_STAGE!\include\zstd.h"
     "!VERIFY_STAGE!\include\zdict.h"
     "!VERIFY_STAGE!\include\zstd_errors.h"
@@ -415,9 +506,16 @@ if errorlevel 1 (
     echo ERROR: zstd stage manifest does not record ZSTD_ZLIB_SUPPORT as OFF.
     exit /b 1
 )
-findstr /x /c:"Project shared smoke test: passed" "!VERIFY_STAGE!\build-manifest.txt" >nul
+findstr /x /c:"Project shared smoke test: not run" "!VERIFY_STAGE!\build-manifest.txt" >nul
 if errorlevel 1 (
-    echo ERROR: zstd stage manifest does not record a passed shared smoke test.
+    echo ERROR: zstd build manifest has an unexpected test status.
+    exit /b 1
+)
+
+set "VERIFY_COMPILER_PDB="
+for /r "!VERIFY_STAGE!" %%F in (vc143.pdb) do if exist "%%~fF" set "VERIFY_COMPILER_PDB=%%~fF"
+if defined VERIFY_COMPILER_PDB (
+    echo ERROR: Compiler PDB vc143.pdb must not be deployed to the zstd stage.
     exit /b 1
 )
 
@@ -549,27 +647,27 @@ exit /b 0
 echo SQLiteBrowser zstd 1.5.7 Windows x64 build script
 echo.
 echo Usage:
-echo   third_party\zstd\build.cmd [all^|debug^|release] [clean]
-echo   third_party\zstd\build.cmd [all^|debug^|release] check
+echo   third_party\zstd\build.cmd check
+echo   third_party\zstd\build.cmd build [all^|debug^|release]
+echo   third_party\zstd\build.cmd test [all^|debug^|release]
+echo   third_party\zstd\build.cmd clean [all^|debug^|release]
+echo   third_party\zstd\build.cmd [all^|debug^|release]
 echo   third_party\zstd\build.cmd --help
 echo.
 echo Defaults:
-echo   all
+echo   build all
 echo.
-echo Build selection:
-echo   all       Build, test, stage, and verify Debug and Release.
-echo   debug     Build, test, stage, and verify Debug only.
-echo   release   Build, test, stage, and verify Release only.
-echo.
-echo Other options:
-echo   clean     Remove the selected zstd work and stage directories before building.
-echo   check     Validate source and toolchain without building.
+echo Actions:
+echo   build     Build only libzstd.dll, stage it, and verify product artifacts.
+echo   test      Build the excluded smoke target, run it, and write test-manifest.txt.
+echo   clean     Remove only the selected zstd private build directory.
+echo   check     Validate source and toolchain without generating output.
 echo.
 echo Stage directories:
-echo   build\zstd\x64-debug\stage
-echo   build\zstd\x64-release\stage
+echo   output\x64-shared-debug\build\zstd\stage
+echo   output\x64-shared-release\build\zstd\stage
 echo.
-echo Every build runs the project-owned shared-library smoke test.
+echo The build action does not compile or run the project-owned smoke test.
 echo Upstream static tests and optional zlib/LZMA/LZ4 compatibility are disabled.
 exit /b 0
 

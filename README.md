@@ -312,17 +312,15 @@ is not required.
 | --- | --- |
 | Visual Studio | Visual Studio 2022 Enterprise, Professional, or Community, installed in its default `C:\Program Files\Microsoft Visual Studio\2022\<Edition>` directory |
 | Visual Studio workload | **Desktop development with C++**, including MSVC v143 x64/x86 build tools and MSBuild |
-| Windows SDKs | Both **10.0.22621.0** and **10.0.26100.0** |
+| Windows SDK | **10.0.26100.0** for Brotli, zlib, zstd, OpenSSL, SQLCipher, and the application |
 | Git | Available as `git.exe` in `PATH` |
 | CMake | Version **3.30.3**, with `cmake.exe` and `ctest.exe` in `PATH` |
 | Qt | Qt **6.11.1**, MSVC 2022 64-bit package (`msvc2022_64`), including Core5Compat, LinguistTools, SVG, and PDF support |
 | Perl | A native Windows Perl distribution, preferably Strawberry Perl, with `perl.exe` in `PATH` |
 | NASM | Available as `nasm.exe` in `PATH` |
 
-The dependency scripts currently build Brotli, OpenSSL, and SQLCipher with
-Windows SDK 10.0.22621.0. The application targets Windows SDK 10.0.26100.0.
-The configure step reports this difference as an expected warning on this
-bring-up branch.
+All migrated dependency scripts and the application use Windows SDK
+10.0.26100.0.
 
 NSIS is not required to compile or run the application. It will be needed
 later for installer packaging.
@@ -358,42 +356,85 @@ The main application currently consumes these pinned dependencies:
 | zlib | v1.3.2 | No |
 | zstd | v1.5.7 | No |
 
-#### 3. Build the required dependency stages
+#### 3. Build and publish the dependency stages
 
 Build the dependencies in this order:
 
 ~~~cmd
-third_party\brotli\build.cmd all
-third_party\openssl\build.cmd all safe
-third_party\sqlcipher\build.cmd all
+third_party\brotli\build.cmd build all
+third_party\zlib\build.cmd build all
+third_party\zstd\build.cmd build all
+third_party\openssl\build.cmd build all
+third_party\openssl\build.cmd test debug safe
+third_party\openssl\build.cmd test release safe
+third_party\sqlcipher\build.cmd build all
+third_party\sqlcipher\build.cmd test all
+third_party\aggregate.cmd build all
+third_party\aggregate.cmd check all
 ~~~
 
-`safe` runs the OpenSSL test suite while excluding `test_bio_dgram`, which can
-conflict with local IPv6 UDP filters. Use `full` only on a machine where the
-script's IPv6 UDP preflight succeeds. Do not use `none` for a normal first
-build.
+The dependency `build` actions create only product stages and record tests as
+`not run`. SQLCipher's separate `test` action builds its private CLI, runs the
+provider smoke and staged-product probes, then writes a test manifest bound to
+the current build manifest. The OpenSSL `safe` commands run its test suite while
+excluding `test_bio_dgram`, which can conflict with local IPv6 UDP filters,
+then run the focused Brotli integration tests. Use `full` only on a machine
+where the script's IPv6 UDP preflight succeeds.
 
-Each script validates the source revision, Visual Studio installation, SDK,
-architecture, CRT, staged files, and build manifest. A non-zero exit code means
-the dependency stage must not be used.
+Each dependency script validates the source revision, Visual Studio
+installation, SDK, architecture, CRT, staged files, and build manifest. The
+final aggregate commands validate all five matching private stages and publish
+only the public allowlist. A non-zero exit code means the dependency output
+must not be used.
 
 Successful builds create:
 
 ~~~text
-build\brotli\x64-debug\stage
-build\brotli\x64-release\stage
-build\openssl\x64-debug\stage
-build\openssl\x64-release\stage
-build\sqlcipher\x64-debug\stage
-build\sqlcipher\x64-release\stage
+output\x64-shared-debug\build\brotli\stage
+output\x64-shared-release\build\brotli\stage
+output\x64-shared-debug\build\zlib\stage
+output\x64-shared-release\build\zlib\stage
+output\x64-shared-debug\build\zstd\stage
+output\x64-shared-release\build\zstd\stage
+output\x64-shared-debug\build\openssl\stage
+output\x64-shared-release\build\openssl\stage
+output\x64-shared-debug\build\sqlcipher\stage
+output\x64-shared-release\build\sqlcipher\stage
+
+output\x64-shared-debug\include
+output\x64-shared-debug\bin
+output\x64-shared-debug\metadata
+output\x64-shared-release\include
+output\x64-shared-release\bin
+output\x64-shared-release\metadata
+~~~
+
+Immediately after dependency aggregation, the public `bin` directories contain
+dependency DLLs, import libraries, and linker PDBs only. The application build
+later adds the application EXE/PDB and Qt runtime without changing files owned
+by the dependency aggregator. These remain development outputs rather than
+application package directories. `metadata\dependency-ownership-manifest.txt`
+records the SHA-256 and relative path of every dependency file managed by the
+aggregator.
+
+To validate without changing files, or to remove only aggregator-owned public
+files for one configuration:
+
+~~~cmd
+third_party\aggregate.cmd check all
+third_party\aggregate.cmd clean debug
+third_party\aggregate.cmd build debug
 ~~~
 
 To inspect the available modes without building:
 
 ~~~cmd
 third_party\brotli\build.cmd --help
+third_party\zlib\build.cmd --help
+third_party\zstd\build.cmd --help
 third_party\openssl\build.cmd --help
 third_party\sqlcipher\build.cmd --help
+third_party\aggregate.cmd --help
 ~~~
 
 #### 4. Create the local CMake Preset file
@@ -417,7 +458,8 @@ slashes in JSON, for example:
 "CMAKE_PREFIX_PATH": "D:/Qt/6.11.1/msvc2022_64"
 ~~~
 
-Do not change the configuration-specific OpenSSL or SQLCipher stage paths.
+Do not change `SQLITEBROWSER_CONFIGURATION_ROOT` or the configuration-specific
+OpenSSL and SQLCipher stage paths.
 `CMakePresets.json` is intentionally ignored by Git because it contains a
 developer-specific Qt path.
 
@@ -445,7 +487,9 @@ cmake --preset release
 cmake --build --preset release
 ~~~
 
-The build runs the application's `POST_BUILD` deployment automatically. It
+Each build preset names only the `sqlitebrowser` product target, so the normal
+command does not compile unit tests or runtime-smoke tools. The build runs the
+application's `POST_BUILD` deployment automatically. It
 copies the matching SQLCipher, OpenSSL, and Brotli DLLs, runs `windeployqt`,
 and fails if required runtime files are missing or Debug and Release files are
 mixed.
@@ -453,27 +497,33 @@ mixed.
 The runnable output directories are:
 
 ~~~text
-build\x64-shared-debug\bin
-build\x64-shared-release\bin
+output\x64-shared-debug\bin
+output\x64-shared-release\bin
 ~~~
 
 Run the application directly:
 
 ~~~cmd
-"build\x64-shared-debug\bin\DB Browser for SQLCipher.exe"
-"build\x64-shared-release\bin\DB Browser for SQLCipher.exe"
+"output\x64-shared-debug\bin\DB Browser for SQLCipher.exe"
+"output\x64-shared-release\bin\DB Browser for SQLCipher.exe"
 ~~~
 
 No Qt, OpenSSL, or SQLCipher directory needs to be added to the global `PATH`.
 
 #### 6. Run the tests
 
-Run the four deterministic unit tests:
+The normal product preset intentionally does not build the four unit-test
+executables. Use the dedicated workflows to configure, build only the unit-test
+aggregate target, and run CTest:
 
 ~~~cmd
-ctest --preset debug
-ctest --preset release
+cmake --workflow --preset test-debug
+cmake --workflow --preset test-release
 ~~~
+
+The four test executables remain under
+`output\x64-shared-<config>\build\tests\unit`; they are never copied to the
+public `bin` directory.
 
 Run the complete deployed-runtime smoke suite:
 
@@ -495,7 +545,7 @@ overridden with the `SQLITEBROWSER_TLS_SMOKE_URL` CMake cache variable.
 | --- | --- |
 | A submodule source file is missing | Run `git submodule update --init --recursive` from the repository root |
 | Visual Studio is not found | Use a supported 2022 edition installed in its default directory and install the Desktop C++ workload |
-| Windows SDK selection fails | Install both SDK 10.0.22621.0 and 10.0.26100.0 through Visual Studio Installer |
+| Windows SDK selection fails | Install SDK 10.0.26100.0 and confirm the Desktop C++ workload selected it |
 | Perl or NASM is not found | Add the native Windows tools to `PATH`, then open a new `cmd.exe` |
 | CMake cannot find Qt | Check that only `CMAKE_PREFIX_PATH` in the local `CMakePresets.json` points to Qt 6.11.1 `msvc2022_64` |
 | OpenSSL full tests report an IPv6 UDP conflict | Rebuild with the documented `safe` test mode |
@@ -505,6 +555,10 @@ overridden with the `SQLITEBROWSER_TLS_SMOKE_URL` CMake cache variable.
 For implementation details and dependency-specific diagnostics, see:
 
 - [Main application CMake migration plan](docs/upgrade/v4.0.0/main-application-cmake-migration-plan.md)
+- [Main application unified output guide](docs/upgrade/v4.0.0/main-application-unified-output-guide.md)
+- [Main application unit-test workflow guide](docs/upgrade/v4.0.0/main-application-unit-test-workflow-guide.md)
+- [Proposed unified output and minimal-build workflow](docs/upgrade/v4.0.0/unified-output-and-minimal-build-plan.md)
+- [Dependency public aggregation guide](docs/upgrade/v4.0.0/dependency-public-aggregation-guide.md)
 - [Brotli VS2022 build analysis](docs/upgrade/v4.0.0/brotli-vs2022-build-analysis.md)
 - [OpenSSL build automation guide](docs/upgrade/v4.0.0/openssl-build-automation-guide.md)
 - [SQLCipher build automation guide](docs/upgrade/v4.0.0/sqlcipher-build-automation-guide.md)

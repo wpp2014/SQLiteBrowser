@@ -47,6 +47,7 @@ endfunction()
 _openssl_manifest_value("OpenSSL tag" _openssl_tag)
 _openssl_manifest_value("Configuration" _openssl_configuration)
 _openssl_manifest_value("Configure target" _openssl_target)
+_openssl_manifest_value("Configure options" _openssl_configure_options)
 _openssl_manifest_value("Windows SDK" _openssl_sdk)
 
 string(REGEX REPLACE "[\\/]+$" "" _openssl_sdk "${_openssl_sdk}")
@@ -75,14 +76,15 @@ if(NOT _openssl_target STREQUAL "VC-WIN64A")
         "OpenSSL VC-WIN64A is required; manifest reports ${_openssl_target}.")
 endif()
 
-file(STRINGS "${_openssl_manifest}" _openssl_compiler_line REGEX "^compiler:")
 if(_openssl_expected_configuration STREQUAL "debug")
-    if(NOT _openssl_compiler_line MATCHES "(^|[ \t])/MDd([ \t]|$)")
-        message(FATAL_ERROR "The Debug OpenSSL manifest does not report the /MDd CRT.")
+    if(NOT _openssl_configure_options MATCHES "(^|[ \t])--debug([ \t]|$)")
+        message(FATAL_ERROR
+            "The Debug OpenSSL manifest does not report the --debug Configure option.")
     endif()
 else()
-    if(NOT _openssl_compiler_line MATCHES "(^|[ \t])/MD([ \t]|$)")
-        message(FATAL_ERROR "The Release OpenSSL manifest does not report the /MD CRT.")
+    if(NOT _openssl_configure_options MATCHES "(^|[ \t])--release([ \t]|$)")
+        message(FATAL_ERROR
+            "The Release OpenSSL manifest does not report the --release Configure option.")
     endif()
 endif()
 

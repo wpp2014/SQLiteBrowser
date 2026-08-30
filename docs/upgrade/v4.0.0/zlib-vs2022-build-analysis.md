@@ -1,5 +1,7 @@
 # zlib 1.3.2 VS2022 x64 动态构建分析
 
+> 2026-08-30 更新：统一输出、最小产品构建、独立 CTest、Debug/Release linker PDB 已经实施。当前契约以 [Windows 统一输出目录与最小构建方案](unified-output-and-minimal-build-plan.md) 和 `third_party/zlib/build.cmd --help` 为准；本文后面的旧路径和旧命令保留为历史分析记录。
+
 > 分析对象：`third_party/zlib/src/CMakeLists.txt`
 >
 > 目标包装文件：`third_party/zlib/CMakeLists.txt`

@@ -46,6 +46,50 @@ if(NOT QT_MAJOR STREQUAL "Qt6")
     message(FATAL_ERROR "Qt6 is required; actual QT_MAJOR: ${QT_MAJOR}")
 endif()
 
+if(NOT DEFINED SQLITEBROWSER_CONFIGURATION_ROOT
+        OR SQLITEBROWSER_CONFIGURATION_ROOT STREQUAL "")
+    message(FATAL_ERROR
+        "SQLITEBROWSER_CONFIGURATION_ROOT must identify the current unified output root.")
+endif()
+
+cmake_path(ABSOLUTE_PATH SQLITEBROWSER_CONFIGURATION_ROOT
+    BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    NORMALIZE
+    OUTPUT_VARIABLE _sqlitebrowser_configuration_root)
+cmake_path(ABSOLUTE_PATH CMAKE_BINARY_DIR
+    NORMALIZE
+    OUTPUT_VARIABLE _sqlitebrowser_binary_dir)
+set(_sqlitebrowser_expected_binary_dir
+    "${_sqlitebrowser_configuration_root}/build/sqlitebrowser")
+cmake_path(NORMAL_PATH _sqlitebrowser_expected_binary_dir)
+cmake_path(COMPARE
+    "${_sqlitebrowser_binary_dir}"
+    EQUAL
+    "${_sqlitebrowser_expected_binary_dir}"
+    _sqlitebrowser_binary_dir_matches)
+if(NOT _sqlitebrowser_binary_dir_matches)
+    message(FATAL_ERROR
+        "The application binary directory must be "
+        "${_sqlitebrowser_expected_binary_dir}; actual: ${_sqlitebrowser_binary_dir}")
+endif()
+
+foreach(_dependency_aggregate_file IN ITEMS
+        "${_sqlitebrowser_configuration_root}/metadata/dependency-aggregate-manifest.txt"
+        "${_sqlitebrowser_configuration_root}/metadata/dependency-ownership-manifest.txt")
+    if(NOT EXISTS "${_dependency_aggregate_file}")
+        message(FATAL_ERROR
+            "The configuration dependency aggregate is incomplete: "
+            "${_dependency_aggregate_file}\n"
+            "Run third_party\\aggregate.cmd build for this configuration first.")
+    endif()
+endforeach()
+
+set(SQLITEBROWSER_CONFIGURATION_ROOT
+    "${_sqlitebrowser_configuration_root}"
+    CACHE PATH "Current SQLiteBrowser unified output root" FORCE)
+set(SQLITEBROWSER_PUBLIC_BIN_DIR
+    "${SQLITEBROWSER_CONFIGURATION_ROOT}/bin")
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
@@ -85,13 +129,16 @@ message(STATUS "  Toolset: ${CMAKE_VS_PLATFORM_TOOLSET}")
 message(STATUS "  Windows SDK: ${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
 message(STATUS "  Qt: ${Qt6_VERSION}")
 message(STATUS "  Qt package: ${Qt6_DIR}")
+message(STATUS "  Configuration root: ${SQLITEBROWSER_CONFIGURATION_ROOT}")
+message(STATUS "  Application build tree: ${CMAKE_BINARY_DIR}")
+message(STATUS "  Development bin: ${SQLITEBROWSER_PUBLIC_BIN_DIR}")
 
 qt_add_executable(${PROJECT_NAME} WIN32)
 set_target_properties(${PROJECT_NAME} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}/bin"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/bin"
-    PDB_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}/bin"
-    PDB_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${SQLITEBROWSER_PUBLIC_BIN_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${SQLITEBROWSER_PUBLIC_BIN_DIR}"
+    PDB_OUTPUT_DIRECTORY_DEBUG "${SQLITEBROWSER_PUBLIC_BIN_DIR}"
+    PDB_OUTPUT_DIRECTORY_RELEASE "${SQLITEBROWSER_PUBLIC_BIN_DIR}"
     MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,Release>:ProgramDatabase>"
 )
 target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/DEBUG>")

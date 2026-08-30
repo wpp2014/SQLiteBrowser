@@ -6,29 +6,37 @@ for %%I in ("%SCRIPT_DIR%..\..") do set "PROJECT_ROOT=%%~fI"
 for %%I in ("%SCRIPT_DIR%.") do set "ZLIB_CMAKE_DIR=%%~fI"
 
 set "ZLIB_SRC=%SCRIPT_DIR%src"
-set "ZLIB_BUILD_ROOT=%PROJECT_ROOT%\build\zlib"
+set "OUTPUT_ROOT=%PROJECT_ROOT%\output"
 set "EXPECTED_ZLIB_COMMIT=da607da739fa6047df13e66a2af6b8bec7c2a498"
 set "EXPECTED_ZLIB_TAG=v1.3.2"
-set "REQUIRED_WINDOWS_SDK=10.0.22621.0"
+set "REQUIRED_WINDOWS_SDK=10.0.26100.0"
 set "WINDOWS_POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
+set "ACTION=build"
+set "ACTION_EXPLICIT=0"
 set "BUILD_CONFIG=all"
-set "CLEAN_BUILD=0"
-set "CHECK_ONLY=0"
 
 :parse_arguments
 if "%~1"=="" goto arguments_parsed
 
-if /i "%~1"=="all" (
+if /i "%~1"=="build" (
+    call :set_action build
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="test" (
+    call :set_action test
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="clean" (
+    call :set_action clean
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="check" (
+    call :set_action check
+    if errorlevel 1 exit /b 1
+) else if /i "%~1"=="all" (
     set "BUILD_CONFIG=all"
 ) else if /i "%~1"=="debug" (
     set "BUILD_CONFIG=debug"
 ) else if /i "%~1"=="release" (
     set "BUILD_CONFIG=release"
-) else if /i "%~1"=="clean" (
-    set "CLEAN_BUILD=1"
-) else if /i "%~1"=="check" (
-    set "CHECK_ONLY=1"
 ) else if /i "%~1"=="--help" (
     goto show_help
 ) else if /i "%~1"=="-h" (
@@ -45,11 +53,6 @@ shift
 goto parse_arguments
 
 :arguments_parsed
-if "!CHECK_ONLY!"=="1" if "!CLEAN_BUILD!"=="1" (
-    echo ERROR: check and clean cannot be used together.
-    exit /b 1
-)
-
 set "LC_ALL=C"
 set "LANG=C"
 set "LANGUAGE="
@@ -57,9 +60,8 @@ set "VSCMD_SKIP_SENDTELEMETRY=1"
 
 echo [zlib] Project root:  !PROJECT_ROOT!
 echo [zlib] Source:        !ZLIB_SRC!
+echo [zlib] Action:        !ACTION!
 echo [zlib] Configuration: !BUILD_CONFIG!
-if "!CLEAN_BUILD!"=="1" echo [zlib] Clean rebuild: yes
-if "!CHECK_ONLY!"=="1" echo [zlib] Check only: yes
 echo.
 
 call :require_tool git.exe "Install Git and add git.exe to PATH."
@@ -80,7 +82,7 @@ call :check_cmake_version
 if errorlevel 1 exit /b 1
 
 if not exist "!ZLIB_SRC!\CMakeLists.txt" (
-    if "!CHECK_ONLY!"=="1" (
+    if /i "!ACTION!"=="check" (
         echo ERROR: The zlib submodule is not initialised: !ZLIB_SRC!
         echo Run: git submodule update --init --recursive
         exit /b 1
@@ -175,10 +177,13 @@ echo [zlib] MSVC tools: !VCToolsVersion!
 echo [zlib] Windows SDK: !WINDOWS_SDK_ACTUAL!
 echo [zlib] CMake: !CMAKE_VERSION!
 
-if "!CHECK_ONLY!"=="1" (
+if /i "!ACTION!"=="check" (
     echo [zlib] Environment check completed successfully. No build was performed.
     exit /b 0
 )
+
+if /i "!ACTION!"=="clean" goto dispatch_clean
+if /i "!ACTION!"=="test" goto dispatch_test
 
 if /i "!BUILD_CONFIG!"=="all" (
     call :build_one Debug
@@ -194,8 +199,49 @@ if /i "!BUILD_CONFIG!"=="all" (
 )
 
 echo.
-echo [zlib] Requested build completed successfully.
-echo [zlib] Build root: !ZLIB_BUILD_ROOT!
+echo [zlib] Requested minimal product build completed successfully.
+echo [zlib] Output root: !OUTPUT_ROOT!
+exit /b 0
+
+:dispatch_test
+if /i "!BUILD_CONFIG!"=="all" (
+    call :test_one Debug
+    if errorlevel 1 exit /b 1
+    call :test_one Release
+    if errorlevel 1 exit /b 1
+) else if /i "!BUILD_CONFIG!"=="debug" (
+    call :test_one Debug
+    if errorlevel 1 exit /b 1
+) else (
+    call :test_one Release
+    if errorlevel 1 exit /b 1
+)
+echo [zlib] Requested tests completed successfully.
+exit /b 0
+
+:dispatch_clean
+if /i "!BUILD_CONFIG!"=="all" (
+    call :clean_one Debug
+    if errorlevel 1 exit /b 1
+    call :clean_one Release
+    if errorlevel 1 exit /b 1
+) else if /i "!BUILD_CONFIG!"=="debug" (
+    call :clean_one Debug
+    if errorlevel 1 exit /b 1
+) else (
+    call :clean_one Release
+    if errorlevel 1 exit /b 1
+)
+echo [zlib] Requested clean completed successfully.
+exit /b 0
+
+:set_action
+if "!ACTION_EXPLICIT!"=="1" if /i not "!ACTION!"=="%~1" (
+    echo ERROR: Multiple actions were specified: !ACTION! and %~1.
+    exit /b 1
+)
+set "ACTION=%~1"
+set "ACTION_EXPLICIT=1"
 exit /b 0
 
 :build_one
@@ -204,14 +250,9 @@ set "CURRENT_CONFIG_LOWER=%~1"
 if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
 if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
 
-set "CURRENT_ROOT=!ZLIB_BUILD_ROOT!\x64-!CURRENT_CONFIG_LOWER!"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\zlib"
 set "CURRENT_WORK=!CURRENT_ROOT!\work"
 set "CURRENT_STAGE=!CURRENT_ROOT!\stage"
-
-if "!CLEAN_BUILD!"=="1" (
-    call :remove_exact_directory "!CURRENT_ROOT!" "!CURRENT_ROOT!"
-    if errorlevel 1 exit /b 1
-)
 
 if not exist "!CURRENT_WORK!" mkdir "!CURRENT_WORK!"
 if errorlevel 1 (
@@ -242,18 +283,10 @@ if errorlevel 1 (
 )
 
 echo.
-echo [zlib] Building !CURRENT_CONFIG! x64...
-cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel
+echo [zlib] Building !CURRENT_CONFIG! x64 product target...
+cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel --target zlib
 if errorlevel 1 (
     echo ERROR: zlib !CURRENT_CONFIG! build failed.
-    exit /b 1
-)
-
-echo.
-echo [zlib] Running !CURRENT_CONFIG! CTest suite...
-ctest --test-dir "!CURRENT_WORK!" -C !CURRENT_CONFIG! --output-on-failure
-if errorlevel 1 (
-    echo ERROR: zlib !CURRENT_CONFIG! CTest suite failed.
     exit /b 1
 )
 
@@ -273,14 +306,53 @@ if errorlevel 1 exit /b 1
 call :verify_stage !CURRENT_CONFIG! !CURRENT_CONFIG_LOWER! "!CURRENT_STAGE!"
 if errorlevel 1 exit /b 1
 
-echo [zlib] !CURRENT_CONFIG! build, CTest, stage, and verification completed.
+echo [zlib] !CURRENT_CONFIG! minimal build, stage, and verification completed.
 exit /b 0
+
+:test_one
+set "CURRENT_CONFIG=%~1"
+set "CURRENT_CONFIG_LOWER=%~1"
+if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
+if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\zlib"
+set "CURRENT_WORK=!CURRENT_ROOT!\work"
+set "CURRENT_STAGE=!CURRENT_ROOT!\stage"
+if not exist "!CURRENT_WORK!\CMakeCache.txt" (
+    echo ERROR: zlib !CURRENT_CONFIG! has not been configured.
+    echo Run: third_party\zlib\build.cmd build !CURRENT_CONFIG_LOWER!
+    exit /b 1
+)
+call :verify_stage !CURRENT_CONFIG! !CURRENT_CONFIG_LOWER! "!CURRENT_STAGE!"
+if errorlevel 1 exit /b 1
+echo [zlib] Building !CURRENT_CONFIG! test-only target...
+cmake --build "!CURRENT_WORK!" --config !CURRENT_CONFIG! --parallel --target zlib_example
+if errorlevel 1 exit /b 1
+echo [zlib] Running !CURRENT_CONFIG! CTest suite...
+ctest --test-dir "!CURRENT_WORK!" -C !CURRENT_CONFIG! --output-on-failure
+if errorlevel 1 (
+    echo ERROR: zlib !CURRENT_CONFIG! CTest suite failed.
+    exit /b 1
+)
+call :write_test_manifest !CURRENT_CONFIG! "!CURRENT_STAGE!"
+if errorlevel 1 exit /b 1
+echo [zlib] !CURRENT_CONFIG! tests completed; product artifacts were not reinstalled.
+exit /b 0
+
+:clean_one
+set "CURRENT_CONFIG=%~1"
+set "CURRENT_CONFIG_LOWER=%~1"
+if /i "!CURRENT_CONFIG!"=="Debug" set "CURRENT_CONFIG_LOWER=debug"
+if /i "!CURRENT_CONFIG!"=="Release" set "CURRENT_CONFIG_LOWER=release"
+set "CURRENT_ROOT=!OUTPUT_ROOT!\x64-shared-!CURRENT_CONFIG_LOWER!\build\zlib"
+call :remove_exact_directory "!CURRENT_ROOT!" "!CURRENT_ROOT!"
+exit /b !ERRORLEVEL!
 
 :write_manifest
 set "MANIFEST_CONFIG=%~1"
 set "MANIFEST_CONFIG_LOWER=%~2"
 set "MANIFEST_STAGE=%~3"
 set "MANIFEST_DLL=!MANIFEST_STAGE!\bin\zlib1.dll"
+set "MANIFEST_PDB=!MANIFEST_STAGE!\bin\zlib1.pdb"
 set "MANIFEST_LIB=!MANIFEST_STAGE!\lib\zlib1.lib"
 set "MANIFEST_FILE=!MANIFEST_STAGE!\build-manifest.txt"
 set "MANIFEST_CRT=/MD"
@@ -323,6 +395,18 @@ if not "!LIB_SHA256:~64,1!"=="" (
     exit /b 1
 )
 
+set "PDB_SHA256="
+certutil.exe -hashfile "!MANIFEST_PDB!" SHA256 >"!HASH_OUTPUT!" 2>nul
+if errorlevel 1 (
+    echo ERROR: certutil.exe failed to hash zlib1.pdb.
+    if exist "!HASH_OUTPUT!" del /q "!HASH_OUTPUT!"
+    exit /b 1
+)
+for /f "usebackq skip=1 tokens=*" %%H in ("!HASH_OUTPUT!") do if not defined PDB_SHA256 set "PDB_SHA256=%%H"
+del /q "!HASH_OUTPUT!"
+set "PDB_SHA256=!PDB_SHA256: =!"
+if "!PDB_SHA256:~63,1!"=="" exit /b 1
+
 > "!MANIFEST_FILE!" echo zlib tag: !EXPECTED_ZLIB_TAG!
 >>"!MANIFEST_FILE!" echo zlib commit: !ZLIB_COMMIT!
 >>"!MANIFEST_FILE!" echo Configuration: !MANIFEST_CONFIG!
@@ -335,14 +419,44 @@ if not "!LIB_SHA256:~64,1!"=="" (
 >>"!MANIFEST_FILE!" echo Library type: shared
 >>"!MANIFEST_FILE!" echo DLL name: zlib1.dll
 >>"!MANIFEST_FILE!" echo Import library: zlib1.lib
->>"!MANIFEST_FILE!" echo Tests: CTest passed
+>>"!MANIFEST_FILE!" echo Linker PDB: zlib1.pdb
+>>"!MANIFEST_FILE!" echo PDB policy: linker PDB staged; compiler PDB excluded
+>>"!MANIFEST_FILE!" echo Release symbol flags: /Zi /DEBUG:FULL /OPT:REF /OPT:ICF
+>>"!MANIFEST_FILE!" echo Tests: not run
 >>"!MANIFEST_FILE!" echo Contrib libraries: disabled
 >>"!MANIFEST_FILE!" echo zlib1.dll SHA-256: !DLL_SHA256!
+>>"!MANIFEST_FILE!" echo zlib1.pdb SHA-256: !PDB_SHA256!
 >>"!MANIFEST_FILE!" echo zlib1.lib SHA-256: !LIB_SHA256!
 if errorlevel 1 (
     echo ERROR: Failed to write zlib build manifest: !MANIFEST_FILE!
     exit /b 1
 )
+exit /b 0
+
+:write_test_manifest
+set "TEST_CONFIG=%~1"
+set "TEST_STAGE=%~2"
+call :calculate_manifest_sha256 "!TEST_STAGE!\build-manifest.txt" BUILD_MANIFEST_SHA256
+if errorlevel 1 exit /b 1
+>"!TEST_STAGE!\test-manifest.txt" echo zlib tag: !EXPECTED_ZLIB_TAG!
+>>"!TEST_STAGE!\test-manifest.txt" echo zlib commit: !ZLIB_COMMIT!
+>>"!TEST_STAGE!\test-manifest.txt" echo Configuration: !TEST_CONFIG!
+>>"!TEST_STAGE!\test-manifest.txt" echo Build manifest SHA-256: !BUILD_MANIFEST_SHA256!
+>>"!TEST_STAGE!\test-manifest.txt" echo CTest: passed
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:calculate_manifest_sha256
+set "HASH_INPUT=%~1"
+set "HASH_RESULT="
+set "HASH_TEMP=%TEMP%\sqlitebrowser-zlib-manifest-!RANDOM!-!RANDOM!.tmp"
+certutil.exe -hashfile "!HASH_INPUT!" SHA256 >"!HASH_TEMP!" 2>nul
+if errorlevel 1 exit /b 1
+for /f "usebackq skip=1 tokens=*" %%H in ("!HASH_TEMP!") do if not defined HASH_RESULT set "HASH_RESULT=%%H"
+del /q "!HASH_TEMP!"
+set "HASH_RESULT=!HASH_RESULT: =!"
+if "!HASH_RESULT:~63,1!"=="" exit /b 1
+set "%~2=!HASH_RESULT!"
 exit /b 0
 
 :verify_stage
@@ -352,6 +466,7 @@ set "VERIFY_STAGE=%~3"
 
 for %%F in (
     "!VERIFY_STAGE!\bin\zlib1.dll"
+    "!VERIFY_STAGE!\bin\zlib1.pdb"
     "!VERIFY_STAGE!\include\zlib.h"
     "!VERIFY_STAGE!\include\zconf.h"
     "!VERIFY_STAGE!\lib\zlib1.lib"
@@ -381,6 +496,18 @@ if errorlevel 1 (
 findstr /x /c:"Windows SDK: !REQUIRED_WINDOWS_SDK!" "!VERIFY_STAGE!\build-manifest.txt" >nul
 if errorlevel 1 (
     echo ERROR: zlib stage manifest has an unexpected Windows SDK.
+    exit /b 1
+)
+findstr /x /c:"Tests: not run" "!VERIFY_STAGE!\build-manifest.txt" >nul
+if errorlevel 1 (
+    echo ERROR: zlib build manifest has an unexpected test status.
+    exit /b 1
+)
+
+set "VERIFY_COMPILER_PDB="
+for /r "!VERIFY_STAGE!" %%F in (vc143.pdb) do if exist "%%~fF" set "VERIFY_COMPILER_PDB=%%~fF"
+if defined VERIFY_COMPILER_PDB (
+    echo ERROR: Compiler PDB vc143.pdb must not be deployed to the zlib stage.
     exit /b 1
 )
 
@@ -521,27 +648,27 @@ exit /b 0
 echo SQLiteBrowser zlib 1.3.2 Windows x64 build script
 echo.
 echo Usage:
-echo   third_party\zlib\build.cmd [all^|debug^|release] [clean]
-echo   third_party\zlib\build.cmd [all^|debug^|release] check
+echo   third_party\zlib\build.cmd check
+echo   third_party\zlib\build.cmd build [all^|debug^|release]
+echo   third_party\zlib\build.cmd test [all^|debug^|release]
+echo   third_party\zlib\build.cmd clean [all^|debug^|release]
+echo   third_party\zlib\build.cmd [all^|debug^|release]
 echo   third_party\zlib\build.cmd --help
 echo.
 echo Defaults:
-echo   all
+echo   build all
 echo.
-echo Build selection:
-echo   all       Build, test, stage, and verify Debug and Release.
-echo   debug     Build, test, stage, and verify Debug only.
-echo   release   Build, test, stage, and verify Release only.
-echo.
-echo Other options:
-echo   clean     Remove the selected zlib work and stage directories before building.
-echo   check     Validate source and toolchain without building.
+echo Actions:
+echo   build     Build only zlib1.dll, stage it, and verify product artifacts.
+echo   test      Build test-only targets, run CTest, and write test-manifest.txt.
+echo   clean     Remove only the selected zlib private build directory.
+echo   check     Validate source and toolchain without generating output.
 echo.
 echo Stage directories:
-echo   build\zlib\x64-debug\stage
-echo   build\zlib\x64-release\stage
+echo   output\x64-shared-debug\build\zlib\stage
+echo   output\x64-shared-release\build\zlib\stage
 echo.
-echo Every build runs CTest. The first version has no skip-test mode.
+echo The build action does not compile or run zlib tests or examples.
 exit /b 0
 
 :show_help_error

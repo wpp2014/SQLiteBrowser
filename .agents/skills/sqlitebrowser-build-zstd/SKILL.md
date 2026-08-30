@@ -1,6 +1,6 @@
 ---
 name: sqlitebrowser-build-zstd
-description: Build, test, verify, and stage the repository-pinned zstd 1.5.7 on Windows x64 with Visual Studio 2022 and SDK 10.0.22621.0. Use for zstd environment checks, Debug or Release builds, shared-DLL smoke tests, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, static/CLI/contrib builds, optional zlib/LZMA/LZ4 compatibility, OpenSSL integration claims, or non-Windows targets.
+description: Build, test, verify, and stage the repository-pinned zstd 1.5.7 on Windows x64 with Visual Studio 2022 and SDK 10.0.26100.0. Use for zstd environment checks, minimal Debug or Release builds, separate shared-DLL smoke tests, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, static/CLI/contrib builds, optional zlib/LZMA/LZ4 compatibility, OpenSSL integration claims, or non-Windows targets.
 ---
 
 # SQLiteBrowser zstd Build
@@ -11,11 +11,11 @@ Use `third_party\zstd\build.cmd` as the single source of truth. Do not reproduce
 
 - Work from the SQLiteBrowser repository containing `third_party/zstd/src`.
 - Treat `third_party/zstd/src` as pinned upstream source. Do not edit it.
-- Target Windows x64, Visual Studio 2022, MSVC v143, and Windows SDK `10.0.22621.0`.
+- Target Windows x64, Visual Studio 2022, MSVC v143, and Windows SDK `10.0.26100.0`.
 - Build only the shared zstd library. Keep static zstd, CLI programs, contrib components, legacy support, and deprecated modules disabled.
 - Keep `ZSTD_ZLIB_SUPPORT`, `ZSTD_LZMA_SUPPORT`, and `ZSTD_LZ4_SUPPORT` disabled.
-- Require both Debug and Release DLLs to be named `libzstd.dll`; keep their matching `libzstd.lib` import libraries in the configuration-specific stage.
-- Treat `build/zstd/x64-<config>/stage` as staging, not system installation or final application packaging.
+- Require both Debug and Release DLLs to be named `libzstd.dll`; keep matching `libzstd.lib` import libraries and linker `libzstd.pdb` files in the configuration-specific stage.
+- Treat `output/x64-shared-<config>/build/zstd/stage` as staging, not system installation or final application packaging.
 - Preserve unrelated worktree changes. Never commit or push unless separately requested.
 
 If the user asks only for analysis, log inspection, or an explanation, do not run a build or modify files.
@@ -24,15 +24,16 @@ If the user asks only for analysis, log inspection, or an explanation, do not ru
 
 Invoke the script from any working directory in the repository.
 
-- No explicit configuration: use `third_party\zstd\build.cmd all`.
-- Debug only: use `third_party\zstd\build.cmd debug`.
-- Release only: use `third_party\zstd\build.cmd release`.
+- No explicit configuration: use `third_party\zstd\build.cmd build all`.
+- Debug only: use `third_party\zstd\build.cmd build debug`.
+- Release only: use `third_party\zstd\build.cmd build release`.
 - Environment validation only: use `third_party\zstd\build.cmd check`.
-- Reproducible rebuild explicitly requested: add `clean` to the selected build configuration.
+- Tests: use `third_party\zstd\build.cmd test <debug|release|all>` after a successful matching build.
+- Cleanup explicitly requested: use `third_party\zstd\build.cmd clean <debug|release|all>`.
 
 Do not add `clean` unless the user selected it or approved removing the selected ignored zstd work and stage directories.
 
-Every actual build runs the project-owned shared-library smoke test. This workflow has no skip-test mode. If the smoke test fails, report the failure; do not generate a manifest or treat staged artifacts as a successful verified build.
+The build action compiles only `libzstd_shared`, stages product artifacts, and marks tests `not run`. The test action builds the excluded smoke target, runs it, and writes `test-manifest.txt` bound to the build manifest SHA-256.
 
 ## Execute and monitor
 
@@ -47,13 +48,14 @@ Every actual build runs the project-owned shared-library smoke test. This workfl
 The script must finish successfully. Each selected stage must contain:
 
 - `bin/libzstd.dll`
+- `bin/libzstd.pdb`
 - `include/zstd.h`
 - `include/zdict.h`
 - `include/zstd_errors.h`
 - `lib/libzstd.lib`
 - `build-manifest.txt`
 
-Confirm the manifest records zstd `v1.5.7`, commit `f8745da6ff1ad1e7bab384bd1f9d742439278e99`, the selected configuration, x64, VS/MSVC/SDK/CMake, `/MDd` or `/MD`, and a passed project shared-library smoke test.
+Confirm the build manifest records zstd `v1.5.7`, commit `f8745da6ff1ad1e7bab384bd1f9d742439278e99`, the selected configuration, x64, VS/MSVC/SDK/CMake, `/MDd` or `/MD`, linker-PDB policy, and tests as `not run`. After `test`, confirm `test-manifest.txt` records the passed smoke test, runtime version, and matching build manifest SHA-256.
 
 Also confirm:
 

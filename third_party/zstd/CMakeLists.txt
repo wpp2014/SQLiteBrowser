@@ -24,7 +24,7 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "This zstd wrapper only supports x64 builds.")
 endif()
 
-set(ZSTD_WINDOWS_SDK_VERSION "10.0.22621.0" CACHE STRING
+set(ZSTD_WINDOWS_SDK_VERSION "10.0.26100.0" CACHE STRING
     "Windows SDK version required by the SQLiteBrowser dependency build"
 )
 
@@ -118,6 +118,22 @@ set_target_properties(libzstd_shared PROPERTIES
     DEBUG_POSTFIX ""
 )
 
+# Keep Release optimized while emitting one linker PDB beside the staged DLL.
+# Compiler PDBs stay in the private work directory.
+target_compile_options(libzstd_shared PRIVATE
+    "$<$<CONFIG:Release>:/Zi>"
+)
+target_link_options(libzstd_shared PRIVATE
+    "$<$<CONFIG:Release>:/DEBUG:FULL>"
+    "$<$<CONFIG:Release>:/OPT:REF>"
+    "$<$<CONFIG:Release>:/OPT:ICF>"
+)
+
+install(FILES "$<TARGET_PDB_FILE:libzstd_shared>"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    CONFIGURATIONS Debug Release
+)
+
 # Upstream's multi-config path does not add DEBUGLEVEL automatically.
 if(CMAKE_CONFIGURATION_TYPES)
     target_compile_definitions(libzstd_shared PRIVATE
@@ -125,7 +141,7 @@ if(CMAKE_CONFIGURATION_TYPES)
     )
 endif()
 
-add_executable(zstd_shared_smoke
+add_executable(zstd_shared_smoke EXCLUDE_FROM_ALL
     "${CMAKE_CURRENT_LIST_DIR}/tests/zstd_smoke.c"
 )
 

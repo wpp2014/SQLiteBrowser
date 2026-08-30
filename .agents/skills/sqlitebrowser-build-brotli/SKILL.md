@@ -1,6 +1,6 @@
 ---
 name: sqlitebrowser-build-brotli
-description: Build, test, verify, and stage the repository-pinned Brotli 1.2.0 on Windows x64 with Visual Studio 2022 and SDK 10.0.22621.0. Use for Brotli environment checks, Debug or Release builds, shared-DLL smoke tests, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, static/CLI builds, OpenSSL integration claims, or non-Windows targets.
+description: Build, test, verify, and stage the repository-pinned Brotli 1.2.0 on Windows x64 with Visual Studio 2022 and SDK 10.0.26100.0. Use for Brotli environment checks, minimal Debug or Release builds, separate shared-DLL smoke tests, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, static/CLI builds, OpenSSL integration claims, or non-Windows targets.
 ---
 
 # SQLiteBrowser Brotli Build
@@ -11,10 +11,10 @@ Use `third_party\brotli\build.cmd` as the single source of truth. Do not reprodu
 
 - Work from the SQLiteBrowser repository containing `third_party/brotli/src`.
 - Treat `third_party/brotli/src` as pinned upstream source. Do not edit it.
-- Target Windows x64, Visual Studio 2022, MSVC v143, and Windows SDK `10.0.22621.0`.
+- Target Windows x64, Visual Studio 2022, MSVC v143, and Windows SDK `10.0.26100.0`.
 - Build only the upstream `brotlicommon`, `brotlidec`, and `brotlienc` shared libraries. Keep static package variants, the Brotli CLI, and upstream CLI-based tests disabled.
 - Require Debug and Release artifacts to keep the un-suffixed names `brotlicommon.dll`, `brotlidec.dll`, and `brotlienc.dll`; keep the three matching linker PDBs and import libraries in the configuration-specific stage, but never stage compiler intermediates such as `vc143.pdb`.
-- Treat `build/brotli/x64-<config>/stage` as dependency staging, not system installation or final application packaging.
+- Treat `output/x64-shared-<config>/build/brotli/stage` as dependency staging, not system installation or final application packaging.
 - Preserve unrelated worktree changes. Never commit or push unless separately requested.
 
 If the user asks only for analysis, log inspection, or an explanation, do not run a build or modify files.
@@ -23,15 +23,16 @@ If the user asks only for analysis, log inspection, or an explanation, do not ru
 
 Invoke the script from any working directory in the repository.
 
-- No explicit configuration: use `third_party\brotli\build.cmd all`.
-- Debug only: use `third_party\brotli\build.cmd debug`.
-- Release only: use `third_party\brotli\build.cmd release`.
+- No explicit configuration: use `third_party\brotli\build.cmd build all`.
+- Debug only: use `third_party\brotli\build.cmd build debug`.
+- Release only: use `third_party\brotli\build.cmd build release`.
 - Environment validation only: use `third_party\brotli\build.cmd check`.
-- Reproducible rebuild explicitly requested: add `clean` to the selected build configuration.
+- Tests: use `third_party\brotli\build.cmd test <debug|release|all>` after a successful matching build.
+- Cleanup explicitly requested: use `third_party\brotli\build.cmd clean <debug|release|all>`.
 
 Do not add `clean` unless the user selected it or approved removing the selected ignored Brotli work and stage directories.
 
-Every actual build runs the project-owned shared-library smoke test. This workflow has no skip-test mode. If the smoke test fails, report the failure; do not generate a manifest or treat staged artifacts as a successful verified build.
+The build action compiles only the three product DLL targets and writes `build-manifest.txt` with tests marked `not run`. The test action builds the excluded smoke target, runs it, and writes `test-manifest.txt` bound to the build manifest SHA-256.
 
 ## Execute and monitor
 
@@ -61,7 +62,7 @@ The script must finish successfully. Each selected stage must contain:
 - `lib/brotlienc.lib`
 - `build-manifest.txt`
 
-Confirm the manifest records Brotli `v1.2.0`, commit `028fb5a23661f123017c060daa546b55cf4bde29`, the selected configuration, x64, VS/MSVC/SDK/CMake, `/MDd` or `/MD`, the linker-PDB-only policy, Release optimized symbol flags, and a passed project shared-library smoke test.
+Confirm the build manifest records Brotli `v1.2.0`, commit `028fb5a23661f123017c060daa546b55cf4bde29`, the selected configuration, x64, VS/MSVC/SDK/CMake, `/MDd` or `/MD`, the linker-PDB-only policy, Release optimized symbol flags, and tests as `not run`. After `test`, confirm `test-manifest.txt` records a passed smoke test and the matching build manifest SHA-256.
 
 Also confirm:
 

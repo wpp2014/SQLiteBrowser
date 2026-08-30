@@ -1,1 +1,6 @@
-third_party/openssl/build.cmd text eol=crlf
+third_party/openssl/build.cmd text eol=crlf whitespace=cr-at-eol
+third_party/brotli/build.cmd text eol=crlf whitespace=cr-at-eol
+third_party/zlib/build.cmd text eol=crlf whitespace=cr-at-eol
+third_party/zstd/build.cmd text eol=crlf whitespace=cr-at-eol
+third_party/sqlcipher/build.cmd text eol=crlf whitespace=cr-at-eol
+third_party/aggregate.cmd text eol=crlf whitespace=cr-at-eol

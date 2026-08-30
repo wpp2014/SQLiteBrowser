@@ -132,7 +132,7 @@ foreach(_forbidden_target IN ITEMS
     endif()
 endforeach()
 
-add_executable(brotli_shared_smoke
+add_executable(brotli_shared_smoke EXCLUDE_FROM_ALL
     "${CMAKE_CURRENT_LIST_DIR}/tests/brotli_smoke.c"
 )
 

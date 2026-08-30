@@ -1,5 +1,7 @@
 # SQLCipher 4.18.0 使用 Visual Studio 2022 构建分析
 
+> 2026-08-30 更新：阶段 4 已完成统一输出与最小构建迁移。当前 SDK、命令、stage、CLI/provider 测试和 build/test manifest 契约以 [SQLCipher 构建脚本与项目 Skill 使用说明](sqlcipher-build-automation-guide.md) 为准；本文中的 SDK 22621、旧 `build/` 路径及“构建时自动测试”内容保留为历史分析记录。
+
 > 文档性质：构建分析与 CMake/MSBuild 包装器实施说明
 >
 > 最后更新：2026-08-26

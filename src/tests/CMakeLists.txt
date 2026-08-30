@@ -2,6 +2,9 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+set(SQLITEBROWSER_UNIT_TEST_OUTPUT_DIR
+    "${SQLITEBROWSER_CONFIGURATION_ROOT}/build/tests/unit")
+
 function(sqlitebrowser_configure_unit_test target)
     target_include_directories(${target}
         PRIVATE
@@ -9,8 +12,11 @@ function(sqlitebrowser_configure_unit_test target)
             "${CMAKE_CURRENT_SOURCE_DIR}/.."
     )
     set_target_properties(${target} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/tests"
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/tests"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${SQLITEBROWSER_UNIT_TEST_OUTPUT_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${SQLITEBROWSER_UNIT_TEST_OUTPUT_DIR}"
+        PDB_OUTPUT_DIRECTORY_DEBUG "${SQLITEBROWSER_UNIT_TEST_OUTPUT_DIR}"
+        PDB_OUTPUT_DIRECTORY_RELEASE "${SQLITEBROWSER_UNIT_TEST_OUTPUT_DIR}"
+        FOLDER "Tests/Unit"
     )
     add_test(NAME ${target} COMMAND $<TARGET_FILE:${target}>)
     set_tests_properties(${target} PROPERTIES
@@ -43,7 +49,8 @@ set(TESTSQLOBJECTS_HDR
     testsqlobjects.h
 )
 
-add_executable(test-sqlobjects ${TESTSQLOBJECTS_HDR} ${TESTSQLOBJECTS_SRC})
+add_executable(test-sqlobjects EXCLUDE_FROM_ALL
+    ${TESTSQLOBJECTS_HDR} ${TESTSQLOBJECTS_SRC})
 target_link_libraries(test-sqlobjects PRIVATE Qt6::Test)
 sqlitebrowser_configure_unit_test(test-sqlobjects)
 
@@ -58,7 +65,8 @@ set(TESTIMPORT_MOC_HDR
     TestImport.h
 )
 
-add_executable(test-import ${TESTIMPORT_MOC_HDR} ${TESTIMPORT_SRC})
+add_executable(test-import EXCLUDE_FROM_ALL
+    ${TESTIMPORT_MOC_HDR} ${TESTIMPORT_SRC})
 target_link_libraries(test-import PRIVATE Qt6::Test)
 sqlitebrowser_configure_unit_test(test-import)
 
@@ -74,7 +82,8 @@ set(TESTREGEX_HDR
     TestRegex.h
 )
 
-add_executable(test-regex ${TESTREGEX_HDR} ${TESTREGEX_SRC})
+add_executable(test-regex EXCLUDE_FROM_ALL
+    ${TESTREGEX_HDR} ${TESTREGEX_SRC})
 target_link_libraries(test-regex PRIVATE Qt6::Test Qt6::Widgets Qt6::Core5Compat)
 sqlitebrowser_configure_unit_test(test-regex)
 
@@ -88,6 +97,16 @@ set(TESTCACHE_HDR
     TestRowCache.h
 )
 
-add_executable(test-cache ${TESTCACHE_HDR} ${TESTCACHE_SRC})
+add_executable(test-cache EXCLUDE_FROM_ALL
+    ${TESTCACHE_HDR} ${TESTCACHE_SRC})
 target_link_libraries(test-cache PRIVATE Qt6::Test)
 sqlitebrowser_configure_unit_test(test-cache)
+
+add_custom_target(sqlitebrowser_unit_tests
+    DEPENDS
+        test-sqlobjects
+        test-import
+        test-regex
+        test-cache
+)
+set_target_properties(sqlitebrowser_unit_tests PROPERTIES FOLDER "Tests")

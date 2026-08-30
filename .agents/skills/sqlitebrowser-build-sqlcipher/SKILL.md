@@ -1,94 +1,84 @@
 ---
 name: sqlitebrowser-build-sqlcipher
-description: Build, CTest, verify, and stage the repository-pinned SQLCipher 4.18.0 with CMake/MSBuild against matching OpenSSL 3.5.7 dynamic-Brotli stages on Windows x64 with Visual Studio 2022 and SDK 10.0.22621.0. Use for SQLCipher environment checks, Debug or Release builds, provider smoke tests, artifact verification, or staging in this SQLiteBrowser repository; do not use for Tcl-suite claims, system installation, final app packaging, or non-Windows targets.
+description: Check, minimally build, provider-test, verify, stage, or clean the repository-pinned SQLCipher 4.18.0 against the matching OpenSSL 3.5.7 dynamic-Brotli stage on Windows x64 with Visual Studio 2022 and SDK 10.0.26100.0. Use for this SQLiteBrowser repository's SQLCipher dependency workflow; not for Tcl-suite claims, system installation, application packaging, or non-Windows targets.
 ---
 
 # SQLiteBrowser SQLCipher Build
 
-Use the repository script as the single source of truth for SQLCipher build commands. NMake generates upstream amalgamation/header/shell sources only; CMake/MSBuild owns the SQLCipher DLL, CLI, tests, installation, and PDB policy. Do not reproduce this workflow unless the user explicitly asks to change the automation.
+Use `third_party\sqlcipher\build.cmd` as the command source of truth. Makefile.msc/NMake only generates upstream amalgamation and public sources; CMake/MSBuild owns product and test targets.
 
-## Establish scope
+## Preserve the build contract
 
 - Work from the SQLiteBrowser repository containing `third_party/sqlcipher/src`.
-- Treat `third_party/sqlcipher/src` as pinned upstream source. Do not edit it.
-- Target Windows x64, Visual Studio 2022, MSVC v143, and Windows SDK `10.0.22621.0`.
-- Link Debug SQLCipher only to the Debug OpenSSL stage and Release only to the Release OpenSSL stage; require that stage to record the pinned dynamic Brotli contract.
-- Treat output in `build/sqlcipher/x64-<config>/stage` as staging, not system installation or final application packaging.
-- Preserve unrelated worktree changes. Never commit or push unless separately requested.
+- Treat the pinned upstream submodule as read-only.
+- Target Windows x64, Visual Studio 2022, MSVC v143, and SDK `10.0.26100.0`.
+- Match Debug SQLCipher only with the Debug OpenSSL stage, and Release only with Release.
+- Never substitute a system OpenSSL or mix configuration stages.
+- Preserve unrelated worktree changes. Do not commit or push unless separately requested.
 
-If the user asks only for analysis, inspect source, scripts, build trees, manifests, or logs without running a build or changing files.
+If the user asks only for analysis, inspect without building, cleaning, or editing.
 
-## Select a build invocation
+## Choose one action
 
-Invoke `third_party\sqlcipher\build.cmd` from any working directory in the repository.
+Run the wrapper from any repository working directory:
 
-- No explicit configuration: use `all`.
-- Debug only: use `debug`.
-- Release only: use `release`.
-- Environment and dependency validation only: add `check`.
-- Reproducible rebuild explicitly requested: add `clean`.
+```cmd
+third_party\sqlcipher\build.cmd check <all|debug|release>
+third_party\sqlcipher\build.cmd build <all|debug|release>
+third_party\sqlcipher\build.cmd test <all|debug|release>
+third_party\sqlcipher\build.cmd clean <all|debug|release>
+```
 
-Do not add `clean` unless the user selected it or approved deleting the selected ignored build and stage directories.
+Defaults are `build all`. Configuration-only invocations remain compatible with build.
 
-## Respect the OpenSSL dependency
+- `check` validates source, toolchain, SDK, OpenSSL/Brotli stage, CRT, and manifests without creating build output.
+- `build` builds only the `sqlcipher` product target, reinstalls its private stage, and records tests as not run.
+- `test` requires a valid existing product stage, builds the excluded `sqlcipher_cli` target, runs CTest and staged-product probes, and writes a test manifest bound to the current build manifest.
+- `clean` removes only the selected SQLCipher private build directory. Use it only when the user selected it or approved deletion.
 
-The selected configuration requires the matching repository stage:
+Read `docs/upgrade/v4.0.0/sqlcipher-build-automation-guide.md` when command, output, manifest, dependency, deployment, or troubleshooting details are needed.
 
-- Debug: `build/openssl/x64-debug/stage`
-- Release: `build/openssl/x64-release/stage`
+## Require the matching OpenSSL stage
 
-If a stage, manifest, or required artifact is missing, stop and report the exact prerequisite command printed by the script. Do not silently link a system OpenSSL, mix Debug and Release, or substitute another OpenSSL or Brotli version.
+The wrapper consumes:
 
-Use `third_party\openssl\build.cmd` or the repository's `sqlitebrowser-build-openssl` skill only when the user has requested that dependency build. The OpenSSL manifest is mandatory and must prove OpenSSL `3.5.7`, its pinned commit, the selected configuration and SDK, Brotli `1.2.0` at its pinned commit, and `enable-brotli-dynamic`.
+```text
+output/x64-shared-debug/build/openssl/stage
+output/x64-shared-release/build/openssl/stage
+```
 
-## Execute and monitor
+Its manifest must prove OpenSSL `3.5.7`, commit `8cf17aaeb4599f8af87fefd810b5b5fee90fe69e`, the selected configuration and SDK, Brotli `1.2.0` at commit `028fb5a23661f123017c060daa546b55cf4bde29`, and `enable-brotli-dynamic`. The minimal OpenSSL stage intentionally has no `openssl.exe`.
 
-1. Read `docs/upgrade/v4.0.0/sqlcipher-build-automation-guide.md` when usage, output layout, dependency, deployment, or troubleshooting detail is needed.
-2. Run the selected repository script command.
-3. Surface prerequisite failures exactly: SQLCipher revision or dirty state, CMake, Visual Studio edition, SDK, MSVC tools, Windows PowerShell, or OpenSSL artifacts.
-4. Do not initialise missing tools or change PATH permanently. The script may initialise the pinned SQLCipher submodule during an actual build.
-5. If CMake reports a generator-instance mismatch, rerun with `clean` only after the user has selected or approved it.
+If missing, report the exact prerequisite command printed by the wrapper. Build OpenSSL only when the user requested or authorized that prerequisite work.
 
-## Validate the result
+## Validate a product build
 
-The script must finish successfully and each selected stage must contain:
+Each selected stage is:
 
-- `bin/sqlcipher.dll`
-- `bin/sqlcipher.exe`
-- `include/sqlcipher/sqlite3.h`
-- `include/sqlcipher/sqlite3ext.h`
-- `include/sqlcipher/sqlite3session.h`
-- `lib/sqlcipher.lib`
-- `bin/sqlcipher.pdb`
-- `bin/sqlcipher-cli.pdb`
-- `share/licenses/sqlcipher/LICENSE.md`
-- `share/licenses/sqlcipher/SQLITE_LICENSE.md`
-- `compile-options.txt`
-- `provider-probe.txt`
-- `build-manifest.txt`
+```text
+output/x64-shared-<config>/build/sqlcipher/stage
+```
 
-Confirm the manifest records SQLCipher `v4.18.0`, commit `63697beb0fafcb61faa7a3e6fd267036548ab11b`, SQLite `3.53.4`, `CMake/MSBuild (Makefile.msc source generation only)`, the selected CRT, the OpenSSL manifest hash, the Brotli contract, and passed CTest/runtime probes. Release must not depend on Debug CRT DLLs; Debug development artifacts must not enter a Release package. Reject generator/compiler PDBs in stage.
+It must contain:
 
-## State the test boundary
+- `bin/sqlcipher.dll` and `bin/sqlcipher.pdb`;
+- `lib/sqlcipher.lib`;
+- `include/sqlcipher/sqlite3.h`, `sqlite3ext.h`, and `sqlite3session.h`;
+- both SQLCipher/SQLite license files;
+- `build-manifest.txt`.
 
-The wrapper builds with `NO_TCL=1`. It runs the CTest shared/provider smoke plus artifact, dependency, CRT, exported-symbol, compile-option, manifest, and CLI provider checks, but it does not run `test/sqlcipher.test` or the SQLite Tcl suite.
+It must not contain the test-only CLI or its PDB, provider/compile probes, OpenSSL/Brotli DLLs, generator PDBs, or compiler PDBs. The build manifest records SQLCipher `v4.18.0`, commit `63697beb0fafcb61faa7a3e6fd267036548ab11b`, SQLite `3.53.4`, configuration, SDK, CRT, OpenSSL manifest hash, product hashes, and test status `not run`.
 
-Never report the result as “SQLCipher tests passed.” Report it as a successful build and stage verification, and explicitly state that the Tcl SQLCipher test suite was not run.
+## Validate a test run
+
+The private `work/test-results` directory must contain the smoke CLI copy, provider output, and compile-option output. The stage must contain `test-manifest.txt` whose build-manifest SHA-256 matches the current product stage and whose CTest and staged-product probes passed.
+
+The wrapper uses `NO_TCL=1`. It does not run `test/sqlcipher.test` or the SQLite Tcl suite. Report successful provider smoke and stage verification, never “SQLCipher official tests passed.”
 
 ## Deployment boundary
 
-For ordinary requests, deployment ends at the configuration-specific SQLCipher stage. Do not copy SQLCipher or OpenSSL DLLs into the SQLiteBrowser application directory, edit `FindSQLCipher.cmake`, or modify installers unless the user explicitly expands the task.
-
-The SQLCipher stage intentionally excludes OpenSSL and Brotli DLLs. Running staged `sqlcipher.exe` requires the matching OpenSSL `bin` directory—which contains its dynamic Brotli runtime—on the process DLL search path. Do not copy dependency DLLs into the SQLCipher stage or use a system-wide OpenSSL as fallback.
+Ordinary work ends at the SQLCipher private stage. Do not copy artifacts into the application directory, update application finders/Presets, aggregate public output, or modify installers unless the user expands the task. SQLCipher stage deliberately excludes OpenSSL/Brotli runtime DLLs; a later configuration-level aggregation step composes the runnable closure.
 
 ## Report
 
-Return:
-
-- selected VS edition, MSVC tools version, CMake version, and SDK;
-- SQLCipher tag and commit;
-- configurations built and exact stage paths;
-- OpenSSL stage and manifest status for each configuration;
-- CTest provider smoke, artifact, compile-option, provider, CRT, PDB, dependency, and manifest verification results;
-- the fact that Tcl SQLCipher tests were not run;
-- every unresolved dependency or deployment blocker.
+State the selected VS edition, MSVC/CMake/SDK, SQLCipher tag/commit, configurations, exact stage paths, matching OpenSSL manifest status, product or provider-test results, and the Tcl-suite boundary. Report every unresolved prerequisite or deployment blocker.

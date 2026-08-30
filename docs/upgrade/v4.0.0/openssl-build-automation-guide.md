@@ -1,344 +1,399 @@
 # OpenSSL 构建脚本与项目 Skill 使用说明
 
-> 适用项目：SQLiteBrowser `upgrade/v4.0.0`
+> 适用分支：upgrade/v4.0.0
 >
-> 适用平台：Windows x64
+> 平台：Windows x64
 >
-> OpenSSL：`openssl-3.5.7` / `8cf17aaeb4599f8af87fefd810b5b5fee90fe69e`
+> OpenSSL：openssl-3.5.7 / 8cf17aaeb4599f8af87fefd810b5b5fee90fe69e
 >
-> 工具链：Visual Studio 2022、MSVC v143、Windows SDK `10.0.22621.0`
+> Brotli：v1.2.0 / 028fb5a23661f123017c060daa546b55cf4bde29
+>
+> 工具链：Visual Studio 2022、MSVC v143、Windows SDK 10.0.26100.0
+>
+> 最后验证：2026-08-30，Debug 与 Release 最小构建和 safe 测试均通过
 
-本文说明如何使用项目自带的 OpenSSL 构建脚本，以及如何在 Codex 和 Claude Code 中调用项目 Skill。OpenSSL 的构建原理、参数依据和产物分析见 [openssl-vs2022-build-analysis.md](openssl-vs2022-build-analysis.md)。
+本文说明阶段 3 完成后的 OpenSSL 构建、测试、验证和 Skill 用法。构建逻辑只维护在 third_party\openssl\build.cmd；Codex 与 Claude Skill 只负责选择命令、监控和解释结果。
 
-## 1. 文件位置
+## 1. 目录结构
 
-项目自动化由以下文件组成：
-
-```text
+~~~text
 SQLiteBrowser/
 |- third_party/
 |  |- openssl/
-|     |- build.cmd                         # 人和 AI 共用的构建入口
-|     |- src/                              # 固定的 OpenSSL 上游子模块
+|     |- build.cmd
+|     |- src/
 |- .agents/
 |  |- skills/
 |     |- sqlitebrowser-build-openssl/
-|        |- SKILL.md                       # Codex 使用的规范 Skill
+|        |- SKILL.md
 |- .claude/
 |  |- skills/
 |     |- sqlitebrowser-build-openssl/
-|        |- SKILL.md                       # Claude Code 兼容入口
-|- build/
-   |- openssl/
-      |- x64-debug/
-      |  |- work/
-      |  |- stage/
-      |- x64-release/
-         |- work/
-         |- stage/
-   |- brotli/
-      |- x64-debug/
-      |  |- stage/                        # Debug OpenSSL 的前置依赖
-      |- x64-release/
-         |- stage/                        # Release OpenSSL 的前置依赖
-```
+|        |- SKILL.md
+|- output/
+   |- x64-shared-debug/
+   |  |- build/
+   |     |- brotli/
+   |     |  |- stage/
+   |     |- openssl/
+   |        |- work/
+   |        |- stage/
+   |- x64-shared-release/
+      |- build/
+         |- brotli/
+         |  |- stage/
+         |- openssl/
+            |- work/
+            |- stage/
+~~~
 
-构建逻辑只存在于 `third_party\openssl\build.cmd`。Skill 负责选择参数、调用脚本、监控和解释结果，不应重新拼装另一套 Configure/NMake 命令。
+work 是 OpenSSL Configure、NMake、中间对象和测试专用程序的私有目录。stage 是给上层构建消费的最小开发 stage。阶段 5 已通过 `third_party\aggregate.cmd` 把经过验证的文件汇总到配置级公共 `include/bin/metadata`；OpenSSL 脚本本身仍不会执行公共汇总或最终应用部署。
 
 ## 2. 前置条件
 
-运行脚本前需要：
-
 - Windows x64；
-- Git，且 `git.exe` 在 `PATH`；
+- Git 在 PATH；
 - Visual Studio 2022 Enterprise、Professional 或 Community，安装在默认目录；
-- Visual Studio 工作负载 `Desktop development with C++`；
-- MSVC v143 x64/x86 build tools；
-- Windows SDK `10.0.22621.0`；
-- Windows 原生 Perl 5.10 或更高版本，推荐 Strawberry Perl；
-- NASM，且 `nasm.exe` 在 `PATH`；
-- Windows 自带的 `certutil.exe`；选择 `full` 时还需要 Windows PowerShell；
-- 已由 `third_party\brotli\build.cmd` 成功构建并验证的匹配配置 Brotli stage。
+- Desktop development with C++、MSVC v143 x64/x86 tools；
+- Windows SDK 10.0.26100.0；
+- Windows 原生 Perl，推荐 Strawberry Perl；
+- NASM 在 PATH；
+- certutil.exe；
+- full 测试还需要 Windows PowerShell；
+- 对应配置的 Brotli stage 已完成并通过脚本验证。
 
-Debug OpenSSL 只允许消费 `build\brotli\x64-debug\stage`，Release 只允许消费 `build\brotli\x64-release\stage`。脚本会验证 Brotli tag、commit、架构、CRT、VS/MSVC/SDK、运行时版本、smoke test 和 manifest；不会退回系统安装的 Brotli，也不会混用配置。
+脚本按以下顺序检查默认 VS 安装目录：
 
-脚本支持 Enterprise（企业版）、Professional（专业版）和 Community（社区版），不依赖某一版独有的编译功能。它只检查以下 Visual Studio 默认目录，并按该顺序选择第一个可用实例：
-
-```text
+~~~text
 C:\Program Files\Microsoft Visual Studio\2022\Enterprise
 C:\Program Files\Microsoft Visual Studio\2022\Professional
 C:\Program Files\Microsoft Visual Studio\2022\Community
-```
+~~~
 
-脚本不使用 `vswhere`，不搜索自定义安装目录，也不会自动安装缺失工具。找不到工具或精确 SDK 时会打印错误并以非零状态退出。
+三个 VS 版本使用相同的 MSVC、SDK、NMake 和链接器接口，均受支持。脚本不扫描自定义 VS 安装目录，也不自动安装缺失工具。
 
-脚本会在自己的 `setlocal` 范围内设置：
+为避免中文 Windows 下 Strawberry Perl 报不支持的 locale，脚本只在自身 setlocal 范围内设置：
 
-```cmd
+~~~cmd
 set "LC_ALL=C"
 set "LANG=C"
 set "LANGUAGE="
-```
+~~~
 
-这用于避免 Strawberry Perl 在中文 Windows 环境中报告不支持的 locale，不会改变应用程序语言或调用者的永久环境变量。
+这些值不会永久改变调用者环境。
 
-## 3. 初始化子模块
+## 3. 初始化和环境检查
 
-推荐克隆或拉取代码后执行：
+首次拉取：
 
-```cmd
+~~~cmd
 git submodule update --init --recursive
-```
+~~~
 
-如果 `third_party\openssl\src\Configure` 不存在，构建脚本也会尝试初始化 OpenSSL 子模块。脚本随后严格检查 OpenSSL commit；如果不是项目固定的 `8cf17aaeb4599f8af87fefd810b5b5fee90fe69e`，或者 OpenSSL 子模块存在本地修改，脚本会拒绝构建，而不会自动 checkout 或覆盖修改。
+先构建匹配配置的 Brotli：
 
-首次构建 OpenSSL 前，先生成 Brotli stage：
+~~~cmd
+third_party\brotli\build.cmd build all
+third_party\openssl\build.cmd check all
+~~~
 
-```cmd
-third_party\brotli\build.cmd all clean
-third_party\openssl\build.cmd check
-```
+也可以只检查单一配置：
 
-`check` 会同时验证 Debug 和 Release 的匹配 Brotli stage。只构建单一配置时，实际构建仍只消费对应配置。
+~~~cmd
+third_party\openssl\build.cmd check debug
+third_party\openssl\build.cmd check release
+~~~
 
-## 4. 直接使用构建脚本
+check 只验证工具链、源码 revision、源码是否干净，以及匹配 Brotli stage，不运行 Configure、编译、安装或测试。
 
-脚本可以从仓库中的任意工作目录调用。以下示例从仓库根目录执行。
+## 4. 命令模型
 
 查看帮助：
 
-```cmd
+~~~cmd
 third_party\openssl\build.cmd --help
-```
+~~~
 
-只检查环境、子模块和工具，不执行 Configure、编译、测试或安装：
+正式接口：
 
-```cmd
-third_party\openssl\build.cmd check
-```
+~~~cmd
+third_party\openssl\build.cmd check [all|debug|release]
+third_party\openssl\build.cmd build [all|debug|release]
+third_party\openssl\build.cmd test <all|debug|release> [safe|full]
+third_party\openssl\build.cmd clean [all|debug|release]
+~~~
 
-不带参数时构建 Debug 和 Release，并执行安全测试模式：
+不带参数等价于：
 
-```cmd
-third_party\openssl\build.cmd
-```
+~~~cmd
+third_party\openssl\build.cmd build all
+~~~
 
-它等价于：
+它只构建 Debug 和 Release 产品，不再隐式运行测试。
 
-```cmd
-third_party\openssl\build.cmd all safe
-```
+为兼容旧的配置优先调用，以下命令仍表示 build：
 
-### 4.1 构建配置
+~~~cmd
+third_party\openssl\build.cmd debug
+third_party\openssl\build.cmd release
+~~~
 
-```cmd
-third_party\openssl\build.cmd debug safe
-third_party\openssl\build.cmd release safe
-third_party\openssl\build.cmd all safe
-```
+旧的 all safe、debug none 等混合参数不再是有效接口。构建和测试必须使用不同命令，避免普通产品构建的成功依赖本机网络测试状态。
 
-OpenSSL NMake 构建不是多配置构建。Debug 和 Release 始终使用各自独立的 `work` 与 `stage`。
+## 5. 最小产品构建
 
-### 4.2 测试模式
+推荐：
 
-安全模式：
+~~~cmd
+third_party\openssl\build.cmd build debug
+third_party\openssl\build.cmd build release
+~~~
 
-```cmd
-third_party\openssl\build.cmd all safe
-```
+脚本执行的核心流程：
 
-执行通用测试套件，但排除可能因本机 IPv6 UDP 回环故障无限等待的 `test_bio_dgram`；随后显式运行 `test_bio_comp test_cert_comp test_tls13certcomp` 三项 Brotli 集成测试。前者必须记录为“部分测试通过”，三项专项测试应单独记录为通过或失败。
+~~~text
+Configure VC-WIN64A shared <debug-or-release>
+  + enable-brotli-dynamic
+  + no-demos
+  + matching Brotli include/bin
+    -> nmake build_libs
+    -> 清理当前配置旧 stage
+    -> nmake install_dev
+    -> 复制匹配 Brotli 运行 DLL
+    -> 写 build-manifest.txt
+    -> 最小 stage、架构、CRT、导出和 DLL 身份验证
+~~~
 
-完整模式：
+选择 build_libs 而不是默认 nmake，可避免把 CLI、provider module、engine 和测试当成产品 target。install_dev 安装运行库、公开头文件、import LIB 和 OpenSSL CMake package，不安装 openssl.exe、providers 或 engines。
 
-```cmd
-third_party\openssl\build.cmd release full
-```
+OpenSSL 上游仍可能在 work 内生成内部静态辅助库和 test utility library；它们是 NMake 图的内部依赖，不会进入 stage 或后续公共 bin。
 
-脚本先执行 IPv6 UDP `::1` 回环收发检查。只有预检成功才运行完整 `nmake test`；预检失败会明确退出，不会静默降级到安全模式。
+## 6. Stage 契约
 
-跳过测试：
+Debug：
 
-```cmd
-third_party\openssl\build.cmd debug none
-```
+~~~text
+output\x64-shared-debug\build\openssl\stage
+~~~
 
-这适合已经验证过同一源码和工具链后的快速增量开发。脚本仍会检查安装产物、版本、provider、CRT、Brotli 动态加载配置、导出和 DLL 身份，但不会运行通用测试或三项 Brotli 专项测试，不能将结果记录为“测试通过”。
+Release：
 
-项目没有在 Configure 中使用 `no-tests`，因此即使某次选择 `none`，仍可在后续补跑完整测试。
+~~~text
+output\x64-shared-release\build\openssl\stage
+~~~
 
-### 4.3 清理重建
+核心内容：
 
-```cmd
-third_party\openssl\build.cmd release full clean
-```
+~~~text
+stage/
+|- build-manifest.txt
+|- test-manifest.txt                 # 只有 test 成功后存在
+|- bin/
+|  |- libcrypto-3-x64.dll
+|  |- libcrypto-3-x64.pdb
+|  |- libssl-3-x64.dll
+|  |- libssl-3-x64.pdb
+|  |- brotlicommon.dll
+|  |- brotlidec.dll
+|  |- brotlienc.dll
+|- include/
+|  |- openssl/
+|- lib/
+   |- libcrypto.lib
+   |- libssl.lib
+   |- cmake/
+      |- OpenSSL/
+         |- OpenSSLConfig.cmake
+         |- OpenSSLConfigVersion.cmake
+~~~
 
-`clean` 只允许删除项目 `build\openssl\x64-debug` 或 `x64-release` 下当前配置的 `work` 和 `stage`，然后从空目录重新 Configure。它不会删除 OpenSSL 源码或其他项目构建目录。
+禁止进入 stage：
 
-不带 `clean` 时，如果工作目录内已有 `makefile` 和 `configdata.pm`，脚本会复用现有配置并执行增量构建；首次构建或显式指定 `clean` 时，才会按固定参数重新执行 Configure。构建参数或工具链要求发生变化后，应使用 `clean`。
+- openssl.exe；
+- legacy.dll 或其他独立 provider module；
+- engine DLL；
+- test、fuzz、demo 和 example EXE；
+- vc143.pdb 等 compiler PDB。
 
-## 5. 输出与验证
+Debug 和 Release 都保留与 DLL 对应的 linker PDB。Release 仍使用优化配置，同时 OpenSSL 上游链接规则生成可调试的 PDB。
 
-Debug stage：
+## 7. 构建验证
 
-```text
-build\openssl\x64-debug\stage
-```
+脚本验证：
 
-Release stage：
+- OpenSSL tag、commit 和干净子模块；
+- VS edition、MSVC tools 和精确 SDK；
+- x64 DLL；
+- Debug/Release CRT 不混用；
+- 公开头文件、import LIB、CMake package；
+- stage 最小 allowlist 与禁止文件；
+- matching Brotli stage 的 tag、commit、配置和 manifest；
+- 三个 Brotli DLL 逐字节一致；
+- configdata.pm 启用 Brotli dynamic；
+- libcrypto 导出 COMP_brotli、COMP_brotli_oneshot、BIO_f_brotli；
+- libcrypto 不直接导入 Brotli DLL，保持运行时动态加载；
+- libssl 正确依赖 libcrypto。
 
-```text
-build\openssl\x64-release\stage
-```
+build-manifest.txt 记录构建 provenance、配置选项、工具链、stage 路径和核心文件 SHA-256，并固定写入：
 
-脚本在安装后检查：
+~~~text
+Build target: build_libs
+Install target: install_dev
+Tests: not run
+OpenSSL CLI staged: no
+Providers staged: no
+Engines staged: no
+~~~
 
-- OpenSSL 版本和 Configure 平台；
-- 默认 provider；
-- `legacy` provider 的显式加载；
-- 公开头文件；
-- `libcrypto.lib` 和 `libssl.lib`；
-- `libcrypto-3-x64.dll` 和 `libssl-3-x64.dll`；
-- OpenSSL CMake package；
-- Debug/Release CRT 依赖。
+普通构建成功不能表述为测试通过。
 
-此外还验证 Brotli 集成：
+## 8. 独立测试
 
-- Configure 同时启用 `brotli` 和 `brotli-dynamic`，并记录匹配 stage 的 include 路径；
-- `libcrypto-3-x64.dll` 导出 `COMP_brotli`、`COMP_brotli_oneshot` 和 `BIO_f_brotli`；
-- `libcrypto-3-x64.dll` 没有对 Brotli DLL 的静态导入依赖，证明采用运行时动态加载；
-- OpenSSL stage 的 `brotlicommon.dll`、`brotlidec.dll`、`brotlienc.dll` 与匹配 Brotli stage 逐字节一致；
-- 三个 Brotli DLL 都是 x64，并与 OpenSSL 配置使用相同 CRT。
+### 8.1 Safe
 
-每个 stage 会生成忽略提交的：
+~~~cmd
+third_party\openssl\build.cmd test debug safe
+third_party\openssl\build.cmd test release safe
+~~~
 
-```text
-build-manifest.txt
-```
+safe 流程：
 
-其中记录 OpenSSL tag/commit、构建配置、测试模式、VS 版本、MSVC tools、Windows SDK、Perl/NASM、`openssl version -a`、Brotli tag/commit/stage/动态加载方式/专项测试状态，以及 OpenSSL 和 Brotli DLL 的 SHA-256。
+1. 验证现有 build-manifest 和最小 stage；
+2. 在 work 内构建测试专用 CLI、provider、fuzz 和测试 EXE；
+3. 运行通用测试套件，但排除 test_bio_dgram；
+4. 单独运行 test_bio_comp、test_cert_comp、test_tls13certcomp；
+5. 不重新安装 stage 产品；
+6. 写 stage\test-manifest.txt。
 
-Debug DLL 依赖 `VCRUNTIME140D.dll`，只能用于开发。Release DLL 必须不依赖 `VCRUNTIME140D.dll` 或 `ucrtbased.dll`。
+test_bio_dgram 可能受开发机 IPv6 UDP 回环过滤、VPN、TUN、代理或防火墙影响。safe 是项目开发机推荐模式，但必须报告为排除一项的部分通过。
 
-## 6. 使用 Codex Skill
+### 8.2 Full
 
-Codex 从仓库根目录的 `.agents\skills` 自动发现项目 Skill，规则见 [Codex Agent Skills 官方文档](https://developers.openai.com/codex/skills)。可以显式调用：
+~~~cmd
+third_party\openssl\build.cmd test release full
+~~~
 
-```text
-$sqlitebrowser-build-openssl 检查当前机器是否满足 OpenSSL 构建条件
-```
+full 先执行 IPv6 UDP ::1 回环收发预检。预检失败时脚本退出，不会静默降级；预检通过后运行未过滤的完整套件和三个 Brotli 聚焦测试。
 
-```text
-$sqlitebrowser-build-openssl 构建 Debug 和 Release，使用 safe 测试模式
-```
+### 8.3 测试记录
 
-```text
-$sqlitebrowser-build-openssl 对 Release 执行 clean 和 full 构建验证
-```
+test-manifest.txt 记录：
 
-也可以自然语言请求：
+- OpenSSL tag 和 commit；
+- 配置和 safe/full；
+- 当前 build-manifest.txt 的 SHA-256；
+- 通用套件结果和过滤条件；
+- 三个 Brotli 聚焦测试结果。
 
-```text
-帮我构建当前项目固定的 OpenSSL Release 版本，先检查环境。
-```
+重新执行 build 会重建 stage 并移除旧 test-manifest。重新执行 test 后才生成绑定新 build manifest 的记录。
 
-Skill 可根据描述自动匹配，但它会区分“只分析”和“实际构建”：只要求分析时不得运行构建或修改文件。
+2026-08-30 的实测：
 
-如果新拉取的 Skill 没有立即出现在 Codex 中，重新打开任务或重启 Codex。
+| 配置 | 模式 | 通用套件 | Brotli 聚焦测试 | 结果 |
+| --- | --- | --- | --- | --- |
+| Debug | safe | 343 files / 4279 tests | 3 files / 11 tests | 全部通过，test_bio_dgram 排除 |
+| Release | safe | 343 files / 4279 tests | 3 files / 11 tests | 全部通过，test_bio_dgram 排除 |
 
-## 7. 使用 Claude Code Skill
+上游因 Windows、非 FIPS、locale 或外部测试未配置而标记的 SKIP 仍属于 OpenSSL 正常测试报告；项目额外排除项只有 safe 模式的 test_bio_dgram。
 
-Claude Code 从 `.claude\skills` 自动发现项目 Skill，规则见 [Claude Code Skills 官方文档](https://code.claude.com/docs/en/skills)。调用方式是：
+## 9. 清理
 
-```text
+~~~cmd
+third_party\openssl\build.cmd clean debug
+third_party\openssl\build.cmd clean release
+third_party\openssl\build.cmd clean all
+~~~
+
+清理只允许删除：
+
+~~~text
+output\x64-shared-<config>\build\openssl
+~~~
+
+以及构建时该目录下精确的 stage 子目录。脚本不会删除 output 根、另一个依赖、源码子模块或另一配置。
+
+## 10. 使用 Codex Skill
+
+显式调用：
+
+~~~text
+$sqlitebrowser-build-openssl 检查 Debug 和 Release 构建环境
+~~~
+
+~~~text
+$sqlitebrowser-build-openssl 只构建 Debug 和 Release 最小产品，不运行测试
+~~~
+
+~~~text
+$sqlitebrowser-build-openssl 对已有 Release 构建运行 safe 测试
+~~~
+
+~~~text
+$sqlitebrowser-build-openssl 对 Release 运行 full 测试；IPv6 预检失败就停止
+~~~
+
+Skill 会区分只分析、构建和测试。用户只要求分析时，不得运行构建或修改文件。
+
+## 11. 使用 Claude Code Skill
+
+~~~text
 /sqlitebrowser-build-openssl 检查构建环境
-```
+~~~
 
-```text
-/sqlitebrowser-build-openssl 构建全部配置，使用 safe 模式
-```
+~~~text
+/sqlitebrowser-build-openssl 构建全部配置，然后分别运行 safe 测试
+~~~
 
-Claude 入口会读取 `.agents\skills\sqlitebrowser-build-openssl\SKILL.md` 中的规范内容，因此构建规则只维护一份。
+.claude 下的入口只转发到 .agents 下的规范 Skill，构建规则只维护一份。
 
-如果首次新增 `.claude\skills` 后当前 Claude Code 会话没有发现它，重启 Claude Code。
+## 12. 当前部署边界
 
-## 8. 部署边界
+阶段 3 的部署终点是 OpenSSL 私有 stage。它还不是：
 
-当前自动化中的“部署”指：
+- output/x64-shared-<config>/bin 公共开发输出；
+- SQLiteBrowser EXE 目录；
+- ZIP、NSIS 或其他正式安装包。
 
-```text
-nmake install_sw + nmake install_ssldirs
-        -> build\openssl\x64-<config>\stage
-```
+后续应用运行时需要匹配配置的：
 
-它不表示复制到 SQLiteBrowser 可执行文件目录，也不表示制作 MSI。
+~~~text
+libcrypto-3-x64.dll
+libssl-3-x64.dll
+brotlicommon.dll
+brotlidec.dll
+brotlienc.dll
+~~~
 
-当前 x64 WiX 安装器仍引用 OpenSSL 1.1.1 文件名：
+五个 DLL 必须作为同一套运行时部署。openssl.exe、provider、engine、import LIB 和 PDB 不应无条件进入用户安装包。
 
-```text
-libcrypto-1_1-x64.dll
-libssl-1_1-x64.dll
-```
+## 13. 常见问题
 
-在安装器和 Qt 6 部署逻辑完成升级前，Skill 不得擅自把 OpenSSL 3 文件复制进最终安装包目录。
+### 找不到 Visual Studio 或 SDK
 
-未来正式应用部署通常只需要 Release：
-
-```text
-bin\libcrypto-3-x64.dll
-bin\libssl-3-x64.dll
-bin\brotlicommon.dll
-bin\brotlidec.dll
-bin\brotlienc.dll
-```
-
-启用 Brotli 动态加载后，五个 DLL 必须作为同一套 Release 运行时部署；不能只部署 OpenSSL 的两个 DLL。
-
-`legacy.dll`、engines、`openssl.cnf`、`openssl.exe` 和 PDB 应根据明确运行时或调试需求决定，不应无条件进入用户安装包。
-
-## 9. 常见错误
-
-### 找不到 Visual Studio
-
-确认 VS2022 安装在受支持的默认目录，并安装了 Desktop development with C++、MSVC v143 和 SDK `10.0.22621.0`。
+确认 VS2022 位于默认目录并安装 Desktop development with C++、MSVC v143 与 SDK 10.0.26100.0。
 
 ### 找不到 Perl 或 NASM
 
-在普通 CMD 中确认：
-
-```cmd
+~~~cmd
 where perl.exe
 where nasm.exe
-```
+~~~
 
-脚本不会扫描自定义工具目录。工具必须可以通过 `PATH` 调用。
+脚本不自动安装工具。
 
-### Perl locale 警告
+### Brotli stage 缺失
 
-必须通过项目脚本运行。脚本在局部环境中固定 `LC_ALL=C` 和 `LANG=C`。不要使用 `PERL_BADLANG=0` 隐藏问题。
+~~~cmd
+third_party\brotli\build.cmd build debug
+third_party\brotli\build.cmd build release
+~~~
 
-### 完整测试拒绝启动
+不要手工修改 manifest 或混用配置。
 
-`full` 模式的 IPv6 UDP 预检失败时，检查 VPN、TUN、代理、防火墙、VMware 网络过滤组件及 `ping -6 ::1`。开发机可以改用 `safe`，但必须记录排除项。
+### Full 测试预检失败
 
-### OpenSSL 子模块版本不符或不干净
+检查 VPN、TUN、代理、防火墙和虚拟网络过滤器。开发机可使用 safe，但发布门禁需要明确决定是否接受排除项。
 
-脚本不会自动丢弃源码改动。先查看：
+### 测试时出现 openssl.exe 或 legacy.dll
 
-```cmd
-git -C third_party\openssl\src status --short
-git -C third_party\openssl\src rev-parse HEAD
-```
-
-确认变更如何处理后再构建。
-
-### Brotli stage 缺失或不匹配
-
-先运行对应配置的 Brotli 构建：
-
-```cmd
-third_party\brotli\build.cmd debug
-third_party\brotli\build.cmd release
-```
-
-不要手工修改 manifest 绕过校验，也不要从另一配置或其他机器只复制部分 DLL。Brotli stage 是 OpenSSL 构建输入，其 provenance 和 CRT 必须整体匹配。
+只要它们位于 work 内就是测试专用产物。若出现在 stage，脚本应判为失败。
