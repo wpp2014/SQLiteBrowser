@@ -99,6 +99,34 @@
       "configuration": "Release",
       "targets": ["sqlitebrowser_unit_tests"],
       "jobs": 0
+    },
+    {
+      "name": "package-runtime-debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "targets": ["sqlitebrowser_package_runtime"],
+      "jobs": 0
+    },
+    {
+      "name": "package-runtime-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_package_runtime"],
+      "jobs": 0
+    },
+    {
+      "name": "runtime-smoke-debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "targets": ["sqlitebrowser_runtime_smoke"],
+      "jobs": 0
+    },
+    {
+      "name": "runtime-smoke-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_runtime_smoke"],
+      "jobs": 0
     }
   ],
   "testPresets": [
@@ -153,6 +181,62 @@
         {
           "type": "test",
           "name": "release"
+        }
+      ]
+    },
+    {
+      "name": "package-debug",
+      "displayName": "Configure and assemble the Debug package runtime",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "package-runtime-debug"
+        }
+      ]
+    },
+    {
+      "name": "package-release",
+      "displayName": "Configure and assemble the Release package runtime",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "package-runtime-release"
+        }
+      ]
+    },
+    {
+      "name": "smoke-debug",
+      "displayName": "Configure, assemble, and smoke-test the Debug package runtime",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "runtime-smoke-debug"
+        }
+      ]
+    },
+    {
+      "name": "smoke-release",
+      "displayName": "Configure, assemble, and smoke-test the Release package runtime",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "runtime-smoke-release"
         }
       ]
     }

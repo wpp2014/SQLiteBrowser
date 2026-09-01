@@ -1,13 +1,13 @@
 # DB Browser for SQLite 主程序 CMake 改造实施方案
 
 > 文档性质：迁移实施方案与阶段执行记录
-> 最后更新：2026-08-29
+> 最后更新：2026-08-31
 > 当前分支：upgrade/v4.0.0
 > 分析基线：1a6e345c37403f7fa20d2e029be5abd5fdfa9b8b
 > 目标平台：Windows x64
 > 目标工具链：Visual Studio 2022、MSVC v143、Windows SDK 10.0.26100.0
 > 目标 Qt：Qt 6.11.1 MSVC2022 x64，本地路径由开发者在 CMakePresets.json 中填写
-> 当前状态：原主程序阶段 0 至阶段 4、统一输出阶段 6 和独立单元测试 workflow 阶段 7 均已完成；install、干净机器 Release gate、ZIP/NSIS、签名和版本号仍待后续阶段。
+> 当前状态：原主程序阶段 0 至阶段 4、统一输出阶段 6、独立单元测试阶段 7、严格 package runtime 阶段 8、空目录全链路验证阶段 9 和 README 正式入口阶段 10 均已完成；install、干净机器 Release gate、ZIP/NSIS、签名和版本号仍待后续阶段。
 
 ## 0.1 统一输出阶段 6 检查点（2026-08-30）
 
@@ -22,7 +22,7 @@ output/x64-shared-release/bin
 
 `CMakePresets.template.json` 和本地 Preset 现在绑定同配置的 `output/.../build/openssl/stage`、`output/.../build/sqlcipher/stage` 和 `SQLITEBROWSER_CONFIGURATION_ROOT`。build preset 显式只构建 `sqlitebrowser`；EXE/PDB、Qt runtime 及 SQLCipher/OpenSSL/Brotli runtime 进入公共 development `bin`。SDK policy 已切换为 `STRICT`。
 
-Debug、Release 的 configure、build、POST_BUILD 校验及受限 `PATH` 启动均已通过。阶段 5 依赖聚合在主程序部署后重复执行，也不会删除或改写应用与 Qt 文件。公共 `bin` 仍是开发输出，不是最终安装包；package runtime 的严格整理留给后续阶段。
+Debug、Release 的 configure、build 和 POST_BUILD development 校验均已通过。阶段 5 依赖聚合在主程序部署后重复执行，也不会删除或改写应用与 Qt 文件。公共 `bin` 仍是开发输出；阶段 8 已在独立目录完成 package runtime 的严格整理。
 
 ## 0.2 统一输出阶段 7 检查点（2026-08-30）
 
@@ -42,14 +42,37 @@ cmake --workflow --preset test-release
 
 两个 workflow 都执行 configure、对应 `unit-tests-*` build preset 和 CTest，实际结果均为 4/4 通过。普通 `debug`/`release` 产品 build preset 仍只构建 `sqlitebrowser`；复跑产品构建没有重新生成测试 EXE，公共 `bin` 也没有测试程序。
 
+## 0.3 Package runtime 阶段 8 检查点（2026-08-31）
+
+新增非默认 `sqlitebrowser_package_runtime` target，从严格验证过的 development `bin` 按文件 allowlist 生成：
+
+~~~text
+output/x64-shared-debug/package/runtime
+output/x64-shared-release/package/runtime
+~~~
+
+正式入口为 `package-debug`、`package-release`、`smoke-debug` 和 `smoke-release` workflow。Debug/Release package runtime 分别为 70/71 个文件，不包含 `.lib`、PDB、zlib、zstd、测试或依赖 CLI；两套受限 `PATH` smoke 的应用启动、SQLCipher、OpenSSL Brotli 和 Qt HTTPS 均通过。详细契约见 [main-application-package-runtime-guide.md](main-application-package-runtime-guide.md)。
+
+## 0.4 空目录全链路阶段 9 检查点（2026-08-31）
+
+删除原 `output/` 后，已按依赖层级重新构建并测试 Brotli、zlib、zstd、OpenSSL、SQLCipher、统一依赖输出和主程序的 Debug/Release。主程序单元测试两个配置均为 4/4 通过，development `bin` 分别严格校验为 89/90 个文件，package runtime 分别严格校验为 70/71 个文件。
+
+两份 package runtime manifest 的 SHA-256 逐项复算失败数均为 0；package 禁止项与公共 `bin` 中测试/CLI 可执行文件数量均为 0。Debug/Release 的应用启动、SQLCipher 加密数据库、OpenSSL Brotli 与 Qt OpenSSL HTTPS smoke 全部通过。OpenSSL 仅声明 safe 测试通过，`test_bio_dgram` 明确排除；SQLCipher Tcl suite 未运行。完整记录见 [phase-9-clean-build-validation.md](phase-9-clean-build-validation.md)。
+
+## 0.5 README 正式入口阶段 10 检查点（2026-09-01）
+
+README 的 Windows v4 构建章节已切换为阶段 9 验证过的正式命令，覆盖工具链、clone/submodule、五个依赖的 check/build/test、Preset 模板、产品构建、独立单元测试、package runtime 和受限 `PATH` smoke。开发者只需在被忽略的本地 `CMakePresets.json` 中填写 Qt 路径。
+
+README 已明确区分 development `bin` 与严格 `package/runtime`，未来 ZIP/NSIS 只能消费后者；`smoke-debug`、`smoke-release` 成为公开 smoke 入口。完整记录见 [phase-10-readme-build-guide-validation.md](phase-10-readme-build-guide-validation.md)。
+
 ## 1. 结论
 
-CMakePresets.template.json 的目录、工具链和依赖 stage 设计已经用于阶段 1 至阶段 4。Debug、Release 两套 Preset 均可完成 configure/generate/build/ctest、POST_BUILD 运行时部署和显式 runtime smoke，各自只引用匹配配置的 OpenSSL 与 SQLCipher stage，并把可直接启动的主程序运行时输出到约定的 bin。
+CMakePresets.template.json 的目录、工具链和依赖 stage 设计已经用于阶段 1 至阶段 10。Debug、Release 两套 Preset 均可完成 configure、产品 build、单元测试、package runtime 组装和显式 runtime smoke，各自只引用匹配配置的 OpenSSL 与 SQLCipher stage；README 已将这些入口作为正式开发流程。
 
-阶段 1 至阶段 4 已解决 Qt/toolchain 配置门禁、Visual Studio 多配置默认值、OpenSSL Config 查找、SQLCipher imported target、Windows GUI 入口、主程序 Qt Test 依赖、binary-tree 翻译、EXE/PDB 输出、CTest、运行时部署和受限 PATH smoke。后续优先事项：
+阶段 1 至阶段 10 已解决 Qt/toolchain 配置门禁、依赖配置绑定、统一开发输出、最小产品构建、独立单元测试、严格 package runtime、受限 PATH smoke、空目录可重复构建验证和开发者 README 入口。后续优先事项：
 
-1. install/NSIS 尚未改为复用经过验证的运行时来源。
-2. 依赖仍由 SDK 10.0.22621.0 构建，正式 Release 前需要用 10.0.26100.0 重建并把 policy 改为 STRICT。
+1. install、ZIP 和安装器尚未改为只消费已验证的 package runtime。
+2. 许可证布局、归档格式、签名和版本号尚未形成发布契约。
 3. Release 尚未在没有 Qt/OpenSSL/SQLCipher 开发环境的干净 Windows 上验证。
 
 建议依次打通“可配置、可编译、可测试、可部署、可验证”，暂不同时修改安装器、版本号或功能代码。
@@ -64,7 +87,7 @@ copy CMakePresets.template.json CMakePresets.json
 
 然后只替换 CMAKE_PREFIX_PATH 的 Qt 占位符。不需要设置 SQLITEBROWSER_QT_ROOT，也不能提交带本机绝对路径的文件。
 
-模板已经通过 cmake --list-presets 解析，可识别 debug 和 release；本地文件保持 ignored。
+模板已经通过 `cmake --list-presets=all` 解析，可识别产品、单元测试、package runtime 和 smoke 的 Debug/Release Preset；本地文件保持 ignored。
 
 目标命令：
 

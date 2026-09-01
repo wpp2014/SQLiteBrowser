@@ -108,9 +108,29 @@ POST_BUILD 会把 SQLCipher、OpenSSL、Brotli DLL 复制到公共 `bin`，然�
 
 公共 `bin` 仍禁止依赖 CLI、测试工具和 `vc143.pdb`。POST_BUILD 还会检查必需 Qt/SQLCipher/OpenSSL/Brotli 文件，以及 Debug/Release Qt runtime 不得混用。
 
-该目录不是最终 ZIP/NSIS package runtime。后续打包必须从 development bin 按严格运行时闭包生成，不得整目录复制。
+该目录不是最终 ZIP/NSIS package runtime。阶段 8 已增加独立的严格运行时目录，后续打包不得整目录复制 development `bin`。
 
-## 6. 本次验证
+## 6. Package runtime
+
+显式 workflow 会从已验证 development `bin` 按 allowlist 生成：
+
+```text
+output/x64-shared-debug/package/runtime
+output/x64-shared-release/package/runtime
+```
+
+使用命令：
+
+```cmd
+cmake --workflow --preset package-debug
+cmake --workflow --preset package-release
+cmake --workflow --preset smoke-debug
+cmake --workflow --preset smoke-release
+```
+
+该目录不含 `.lib`、PDB、zlib、zstd、测试或 CLI，完整契约见 [main-application-package-runtime-guide.md](main-application-package-runtime-guide.md)。
+
+## 7. 本次验证
 
 2026-08-30 已完成：
 

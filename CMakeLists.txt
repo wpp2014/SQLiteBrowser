@@ -142,6 +142,11 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,Release>:ProgramDatabase>"
 )
 target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/DEBUG>")
+if(MSVC)
+    # Serialize writes to the target compiler PDB when MSBuild schedules
+    # multiple cl.exe processes for the same project.
+    target_compile_options(${PROJECT_NAME} PRIVATE /FS)
+endif()
 
 execute_process(
     COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short --verify HEAD
@@ -388,12 +393,24 @@ if(SQLITEBROWSER_DEPLOY_RUNTIME)
         SQLCIPHER_TARGET SQLCipher::SQLCipher
     )
 
+    set(SQLITEBROWSER_PACKAGE_RUNTIME_DIR
+        "${SQLITEBROWSER_CONFIGURATION_ROOT}/package/runtime")
+    set(SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST
+        "${SQLITEBROWSER_CONFIGURATION_ROOT}/package/metadata/runtime-manifest.txt")
+    sqlitebrowser_add_windows_package_runtime(
+        TARGET ${PROJECT_NAME}
+        RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+        MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+    )
+
     if(ENABLE_TESTING)
         sqlitebrowser_add_windows_runtime_smoke(
             APP_TARGET ${PROJECT_NAME}
             SQLCIPHER_TARGET SQLCipher::SQLCipher
             SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/runtime_smoke.cpp"
             TLS_URL "${SQLITEBROWSER_TLS_SMOKE_URL}"
+            RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+            RUNTIME_TARGET sqlitebrowser_package_runtime
         )
     endif()
 endif()

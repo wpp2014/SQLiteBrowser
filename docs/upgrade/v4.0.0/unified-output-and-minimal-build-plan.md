@@ -2,7 +2,7 @@
 
 > 文档性质：目录重构与构建命令设计
 >
-> 最后更新：2026-08-30
+> 最后更新：2026-08-31
 >
 > 当前分支：`upgrade/v4.0.0`
 >
@@ -10,7 +10,7 @@
 >
 > 目标工具链：Visual Studio 2022、MSVC v143、Windows SDK `10.0.26100.0`
 >
-> 状态：阶段 7 已完成；产品构建和单元测试 workflow 已分离，development/package runtime 区分仍待阶段 8 完成
+> 状态：阶段 10 已完成；README 已采用实测通过的统一构建、测试和 package runtime 正式流程
 
 阶段 5 的正式命令、目录 allowlist、验证与清理规则见 [dependency-public-aggregation-guide.md](dependency-public-aggregation-guide.md)。
 
@@ -63,6 +63,27 @@ output/x64-shared-<config>/bin
 - 新增 `unit-tests-debug`、`unit-tests-release` build preset 和 `test-debug`、`test-release` workflow preset；
 - workflow 按“configure → build unit tests → CTest”执行，测试 EXE/PDB 留在 `output/x64-shared-<config>/build/tests/unit`；
 - Debug、Release workflow 均为 4/4 通过；随后执行普通产品 build 未重建测试程序，公共 `bin` 未出现测试 EXE。
+- runtime 校验已拆分为 DEVELOPMENT 与 PACKAGE 两套严格文件契约；development `bin` 分别固定为 Debug 89、Release 90 个允许文件；
+- 新增非默认 `sqlitebrowser_package_runtime` target，从已验证 development `bin` 逐项复制 allowlist 到 `package/runtime`，不允许整目录复制；
+- package runtime manifest 为每个运行时文件记录 SHA-256，Debug/Release 分别有 70/71 个文件；
+- package runtime 均不包含 `.lib`、PDB、zlib、zstd、测试工具或依赖 CLI；
+- 新增 `package-debug`、`package-release`、`smoke-debug` 和 `smoke-release` workflow；
+- runtime smoke 已切换为只针对 package runtime 执行，Debug/Release 的应用启动、SQLCipher、Brotli 和 Qt OpenSSL HTTPS 全部通过；
+- 主目标增加 MSVC `/FS`，解决并行编译时 compiler PDB 的 `C1041` 争用，但 compiler PDB 仍只保留在 `build`。
+
+### 1.2 2026-08-31 阶段 9 干净构建检查点
+
+阶段 9 删除原 `output/` 后，按 Brotli/zlib/zstd、OpenSSL、SQLCipher、公共依赖汇总、主程序、单元测试、package runtime 和受限 PATH smoke 的顺序重新执行 Debug/Release 全链路。全部构建和验证通过，过程中不需要修改工程或脚本。
+
+最终 development `bin` 分别为 Debug 89、Release 90 个文件；package runtime 分别为 70/71 个文件。两份 package manifest 的 SHA-256 逐项复算失败数均为 0，package 禁止项和公共 `bin` 中测试/CLI 可执行文件数量均为 0。单元测试两个配置均为 4/4 通过，应用启动、SQLCipher、OpenSSL Brotli 与 Qt OpenSSL HTTPS smoke 均通过。
+
+OpenSSL 只执行 safe 测试：两个配置的通用套件均为 343 files / 4279 tests，Brotli 聚焦套件均为 3 files / 11 tests；`test_bio_dgram` 被明确排除，不能描述为 full test pass。完整命令和实测记录见 [phase-9-clean-build-validation.md](phase-9-clean-build-validation.md)。
+
+### 1.3 2026-09-01 阶段 10 README 检查点
+
+README 的 Windows v4 章节现已使用阶段 9 实测通过的正式顺序，覆盖五个依赖的 check/build/test、依赖汇总、主程序产品 Preset、独立单元测试、严格 package runtime 和受限 `PATH` smoke。runtime smoke 的公共入口统一为 `smoke-debug`、`smoke-release` workflow，不再要求开发者直接调用底层 target。
+
+README 同时明确 development `bin` 不能作为 ZIP/安装器输入，后续发布只能消费 `output/x64-shared-<config>/package/runtime`；package manifest、Debug/Release 70/71 个文件、Release compiler runtime 和 Debug 非正式发布边界均已写入。完整记录见 [phase-10-readme-build-guide-validation.md](phase-10-readme-build-guide-validation.md)。
 
 ## 2. 最终决策
 
@@ -401,7 +422,7 @@ output/x64-shared-<config>/build/tests/runtime-smoke
 
 ## 7. 建议的完整开发流程
 
-以下依赖构建、汇总、主程序和单元测试 workflow 均已可以执行。阶段 8 将继续区分 development output 和 package runtime。
+以下依赖构建、汇总、主程序、单元测试和 package runtime workflow 均已可以执行。
 
 ### 7.1 初始化
 
@@ -499,7 +520,7 @@ metadata/manifests/<dependency>/test-manifest.txt
 
 ## 9. 开发输出与发布输出必须区分
 
-统一公共 `bin` 会包含 zlib、zstd、import LIB 和 PDB，而当前应用运行时校验故意禁止这些文件。目录重构后需要两种校验策略：
+统一公共 `bin` 包含 zlib、zstd、import LIB 和 PDB，因此阶段 8 已实现两种独立的严格校验策略。正式命令和完整 allowlist 见 [main-application-package-runtime-guide.md](main-application-package-runtime-guide.md)。
 
 ### Development output
 
@@ -508,12 +529,25 @@ metadata/manifests/<dependency>/test-manifest.txt
 - 验证实际加载的 SQLCipher、OpenSSL、Brotli 和 Qt DLL 来自当前配置；
 - 不得包含另一配置的 DLL 或 compiler PDB。
 
+对应目录为 `output/x64-shared-<config>/bin`，由普通应用 build 的 `POST_BUILD` 更新并执行 DEVELOPMENT 校验。
+
 ### Package runtime
 
 - 只包含应用实际运行时闭包；
 - 不包含 `.lib`、PDB、zlib、zstd、测试工具或诊断 CLI；
 - 继续执行当前严格 allowlist 和受限 `PATH` smoke；
 - NSIS、ZIP 不能直接复制整个开发 `bin`。
+
+对应目录为 `output/x64-shared-<config>/package/runtime`，通过以下显式 workflow 生成：
+
+```cmd
+cmake --workflow --preset package-debug
+cmake --workflow --preset package-release
+cmake --workflow --preset smoke-debug
+cmake --workflow --preset smoke-release
+```
+
+每次组装都会先验证 development output，再逐项复制 PACKAGE allowlist、生成 SHA-256 manifest 并拒绝任何额外文件。
 
 ## 10. 清理策略
 
@@ -588,8 +622,8 @@ third_party\aggregate.cmd clean debug
 5. 增加公共产物汇总和 ownership manifest。（已完成）
 6. 修改主程序 Preset、binary directory 和依赖 stage 路径。（已完成）
 7. 将四个单元测试改为 `EXCLUDE_FROM_ALL` 并增加 test workflow。（已完成）
-8. 调整 runtime 校验，区分 development output 和 package runtime。
-9. 从空目录分别构建并测试 Debug、Release。
-10. 最后更新 README，将本文中的目标命令升级为正式命令。
+8. 调整 runtime 校验，区分 development output 和 package runtime。（已完成）
+9. 从空目录分别构建并测试 Debug、Release。（已完成）
+10. 最后更新 README，将本文中的目标命令升级为正式命令。（已完成）
 
 不建议一次性把目录迁移、依赖脚本、主程序、安装器和 NSIS 全部改完。每个依赖完成新的产品构建、独立测试和目录验证后，再迁移上层消费者。
