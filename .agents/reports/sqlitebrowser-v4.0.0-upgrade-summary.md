@@ -19,10 +19,11 @@
 - 主程序已使用 CMake Preset 构建，Qt 路径只写入开发者本地 Preset；
 - 普通产品构建、单元测试、package runtime 和 runtime smoke 已拆成独立入口；
 - 主程序构建完成后，development `bin` 可以直接运行；
-- package runtime 使用严格 allowlist 和 SHA-256 manifest，可作为未来 ZIP/NSIS 的唯一输入；
+- package runtime 使用严格 allowlist 和 SHA-256 manifest，已作为 ZIP、NSIS SFX 和 MSI 的唯一输入；
+- Release x64 ZIP、NSIS 3.12 自解压 EXE 与 WiX 7 MSI 已生成，并通过解包、文件集合和 SHA-256 验证；
 - 已从空 `output/` 完成 Debug/Release 全链路重建和验证。
 
-阶段 1 至阶段 10 已完成。当前尚未完成的是正式发布链路：CMake install、ZIP/NSIS、许可证布局、签名、版本号、CI 和干净 Windows 机器 Release gate。
+阶段 1 至阶段 10 已完成，ZIP、portable SFX 与 MSI 的本机构建闭环也已打通。当前尚未完成的是 CMake install、许可证布局、签名、SBOM、CI 和干净 Windows 机器 Release gate。
 
 本分支直接以当前代码为升级基线，不再以 `v3.13.1` 的本地开发环境为前置条件，也不在构建迁移期间自动同步、合并或回退上游标签。
 
@@ -38,7 +39,7 @@
 | Qt | `6.11.1`、`msvc2022_64`，包含 Core5Compat、LinguistTools、SVG、PDF |
 | Git | 在 `PATH` 中；已验证 Git for Windows 2.45.1 |
 | OpenSSL 工具 | Windows 原生 Perl、NASM、NMake |
-| 打包工具 | NSIS 3.12 已安装，但当前编译流程不使用 |
+| 打包工具 | NSIS 3.12（默认安装路径）用于 portable SFX；WiX SDK 7.0.0 由项目锁定并恢复 |
 
 依赖脚本只探测以下 Visual Studio 默认目录，不支持自定义安装位置：
 
@@ -318,10 +319,10 @@ Skill 只负责选择命令、监控和解释结果。仅要求分析时不得�
 
 ### 9.1 尚未完成
 
-- CMake install、portable ZIP、NSIS/WiX 尚未消费 `package/runtime`；
+- portable ZIP、NSIS SFX 和 WiX MSI 已只消费 `package/runtime`；CMake install 尚未迁移；
 - Release 尚未在不含 Qt/OpenSSL/SQLCipher 开发环境的干净 Windows 机器验证；
 - CI 尚未固化完整依赖、产品、测试、package 和 smoke 流程；
-- v4.0.0 版本号、文件版本、产品名称和升级策略尚未实施；
+- CMake/MSI 已使用 v4.0.0 和固定 UpgradeCode；EXE 文件版本、跨产物产品名称及真实旧版升级兼容仍需验证；
 - 许可证布局、SBOM、代码签名、归档签名和安装/卸载测试尚未定义。
 
 ### 9.2 测试声明限制
@@ -363,7 +364,7 @@ Skill 只负责选择命令、监控和解释结果。仅要求分析时不得�
 下一阶段只处理正式发布闭环，不重新设计已经验证的依赖构建：
 
 1. 定义 Release package 契约：版本、文件名、许可证、VC runtime、manifest、签名和 SBOM；
-2. 让 CMake install、ZIP 和 NSIS 只消费 `output/x64-shared-release/package/runtime`；
+2. 让尚未迁移的 CMake install 复用 ZIP/SFX/MSI 已采用的 `output/x64-shared-release/package/runtime`；
 3. 禁止安装器重新从 development `bin`、私有 stage、系统目录或 `PATH` 选择 DLL；
 4. 增加归档内容 allowlist、安装/卸载和升级测试；
 5. 在干净 Windows x64 环境验证启动、数据库、TLS、插件和实际 DLL 来源；

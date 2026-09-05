@@ -1,0 +1,45 @@
+<Project Sdk="WixToolset.Sdk/7.0.0">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputName>DB.Browser.for.SQLCipher-$(PackageVersion)-win-x64</OutputName>
+    <OutputPath>$(PackageOutput)\</OutputPath>
+    <IntermediateOutputPath>$(WixIntermediateRoot)\obj\</IntermediateOutputPath>
+    <DebugType>full</DebugType>
+    <DefaultCompressionLevel>high</DefaultCompressionLevel>
+    <Pedantic>true</Pedantic>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
+    <DefineConstants>PayloadRoot=$(PayloadRoot);PackageVersion=$(PackageVersion);ProductName=$(ProductName);Manufacturer=$(Manufacturer);UpgradeCode=$(UpgradeCode);SourceRoot=$(SourceRoot)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="[7.0.0]" />
+  </ItemGroup>
+
+  <Target Name="ValidateSQLiteBrowserWixInputs" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(Configuration)' != 'Release'"
+           Text="The SQLiteBrowser MSI is Release-only." />
+    <Error Condition="'$(Platform)' != 'x64'"
+           Text="The SQLiteBrowser MSI is x64-only." />
+    <Error Condition="'$(WixSdkVersion)' != '7.0.0'"
+           Text="WixSdkVersion must exactly match WixToolset.Sdk 7.0.0." />
+    <Error Condition="'$(PayloadRoot)' == '' Or !Exists('$(PayloadRoot)')"
+           Text="PayloadRoot must identify the validated Release package runtime." />
+    <Error Condition="'$(PackageVersion)' == ''"
+           Text="PackageVersion is required." />
+    <Error Condition="'$(ProductName)' == ''"
+           Text="ProductName is required." />
+    <Error Condition="'$(Manufacturer)' == ''"
+           Text="Manufacturer is required." />
+    <Error Condition="'$(UpgradeCode)' == ''"
+           Text="UpgradeCode is required." />
+    <Error Condition="'$(PackageOutput)' == ''"
+           Text="PackageOutput is required." />
+    <Error Condition="'$(WixIntermediateRoot)' == ''"
+           Text="WixIntermediateRoot is required." />
+    <Error Condition="'$(SourceRoot)' == '' Or !Exists('$(SourceRoot)')"
+           Text="SourceRoot must identify the SQLiteBrowser repository." />
+  </Target>
+</Project>

@@ -20,12 +20,13 @@ themselves, so a Developer Command Prompt is not required.
 | Qt | Qt **6.11.1**, MSVC 2022 64-bit package (`msvc2022_64`), including Core5Compat, LinguistTools, SVG, and PDF support |
 | Perl | A native Windows Perl distribution, preferably Strawberry Perl, with `perl.exe` in `PATH` |
 | NASM | Available as `nasm.exe` in `PATH` |
+| NSIS | Version **3.12**, installed at the default `C:\Program Files (x86)\NSIS` path, for the optional portable self-extracting EXE |
 
 All migrated dependency scripts and the application use Windows SDK
 10.0.26100.0.
 
-NSIS is not required to compile or run the application. It will be needed
-later for installer packaging.
+NSIS is not required to compile or run the application. It is required only
+when building the portable self-extracting EXE.
 
 You can check the command-line tools before cloning:
 
@@ -287,11 +288,180 @@ and the actual loaded DLL locations. The HTTPS check requires network access
 to `https://download.sqlitebrowser.org/currentrelease`; its endpoint can be
 overridden with the `SQLITEBROWSER_TLS_SMOKE_URL` CMake cache variable.
 
-These directories are validated inputs for the future ZIP/NSIS process, not
-finished release archives or installers. Packaging must consume
-`package\runtime` and must not select files again from the development `bin`.
+These directories are validated packaging inputs, not finished release
+archives or installers. Packaging must consume `package\runtime` and must not
+select files again from the development `bin`.
 
-## 8. Common build failures
+## 8. Build the Release x64 ZIP archive
+
+The ZIP archive consumes the same validated Release runtime used by the MSI.
+It does not use the legacy Windows `install()` rules and does not collect files
+again from the development `bin` directory.
+
+Build, smoke-test, archive, extract, and verify the ZIP from the repository
+root:
+
+~~~cmd
+cmake --workflow --preset zip-release
+~~~
+
+The equivalent convenience entry point is:
+
+~~~cmd
+installer\windows\zip\build.cmd
+~~~
+
+The workflow creates one fixed `DB Browser for SQLCipher` top-level directory,
+checks every source file against `runtime-manifest.txt`, extracts the finished
+archive into a separate verification directory, compares all 71 files and
+hashes, and runs the restricted-`PATH` startup, SQLCipher, Brotli, TLS, and
+HTTPS smoke checks from the extracted copy.
+
+Outputs are written to:
+
+~~~text
+output\x64-shared-release\package\artifacts\
+  DB.Browser.for.SQLCipher-4.0.0-win-x64.zip
+  DB.Browser.for.SQLCipher-4.0.0-win-x64.zip.sha256
+
+output\x64-shared-release\package\metadata\zip-manifest.txt
+output\x64-shared-release\package\verify\zip\
+~~~
+
+This is an install-free archive: users can extract it and start the executable
+without registering an installed product. It does not yet implement a special
+portable settings mode, so application settings may still use the normal
+registry or AppData locations.
+
+## 9. Build the Release x64 portable self-extracting EXE
+
+The NSIS package is an extraction-only portable wrapper around the same strict
+71-file Release runtime used by the ZIP and MSI. It does not install a product,
+write the registry, create shortcuts or an uninstaller, change `PATH`, request
+administrator rights, or inspect/remove an installed version.
+
+Install NSIS 3.12 in its default directory, then run from the repository root:
+
+~~~cmd
+cmake --workflow --preset portable-sfx-release
+~~~
+
+The equivalent convenience entry point is:
+
+~~~cmd
+installer\windows\nsis\build.cmd
+~~~
+
+The workflow validates and smoke-tests the Release runtime, builds a Unicode
+NSIS executable with forced CRC checking and solid LZMA compression, silently
+extracts it to a path containing spaces and non-ASCII characters, verifies all
+71 paths and hashes, and reruns the startup, SQLCipher, Brotli, TLS, and HTTPS
+smoke checks from the extracted directory. A negative test also confirms that
+a non-empty destination is rejected without modifying its sentinel file.
+
+Outputs are written to:
+
+~~~text
+output\x64-shared-release\package\artifacts\
+  DB.Browser.for.SQLCipher-4.0.0-win-x64-portable.exe
+  DB.Browser.for.SQLCipher-4.0.0-win-x64-portable.exe.sha256
+
+output\x64-shared-release\package\metadata\portable-sfx-manifest.txt
+output\x64-shared-release\package\verify\portable-sfx\
+~~~
+
+Double-click the EXE and choose a new or empty user-writable directory. The
+default is a versioned directory next to the self-extractor. The extraction is
+staged in a reserved sibling directory and published only after every embedded
+file has been written. Existing non-empty destinations, files, drive/share
+roots, Windows directories, and Program Files trees are rejected.
+
+For unattended extraction, `/D=` must be the final argument and must not be
+quoted, even when its value contains spaces:
+
+~~~cmd
+DB.Browser.for.SQLCipher-4.0.0-win-x64-portable.exe /S /D=F:\Portable Apps\SQLiteBrowser
+~~~
+
+The stable validation exit codes are 21 for an invalid path, 22 for a root,
+23 for a protected system tree, 24 for an existing file, and 25 for a non-empty
+directory. Extraction-stage failures use codes 31 through 40. Silent mode does
+not display message boxes or launch the application.
+
+Like the ZIP, this is install-free packaging, not a dedicated portable-settings
+mode. Application settings can still use the normal registry or AppData paths.
+
+## 10. Build the Release x64 MSI with WiX
+
+The MSI uses the SDK-style project under `installer\windows\wix`. Visual Studio
+2022 MSBuild restores the repository-pinned WiX SDK and UI extension from
+NuGet. Do not install WiX globally, and do not use the legacy `candle.exe` or
+`light.exe` scripts under `installer\windows`.
+
+WiX 7 requires each developer or organisation to review and explicitly accept
+its OSMF EULA. This repository does not accept the EULA automatically. After
+reviewing the current terms at <https://wixtoolset.org/osmf/>, a developer who
+is authorised to accept them can use a Developer Command Prompt for VS 2022:
+
+~~~cmd
+msbuild installer\windows\wix\SQLiteBrowser.Installer.wixproj ^
+  -t:AcceptEula ^
+  -p:EulaId=wix7
+~~~
+
+This is a one-time per-user, per-computer action. Do not add
+`<AcceptEula>wix7</AcceptEula>` to the project unless the repository owner has
+made and documented that licensing decision.
+
+Build, smoke-test, package, and verify the MSI from the repository root:
+
+~~~cmd
+cmake --workflow --preset msi-release
+~~~
+
+The equivalent convenience entry point is:
+
+~~~cmd
+installer\windows\wix\build.cmd
+~~~
+
+The workflow:
+
+1. configures and minimally builds the Release x64 application;
+2. assembles the strict 71-file Release package runtime;
+3. runs the restricted-`PATH` startup, SQLCipher, Brotli, TLS, and HTTPS smoke
+   checks;
+4. checks every runtime path and SHA-256 against `runtime-manifest.txt`;
+5. restores the exactly pinned `WixToolset.Sdk` 7.0.0 and restores
+   `WixToolset.UI.wixext` 7.0.0 using `packages.lock.json`;
+6. builds the per-machine x64 MSI with VS2022 MSBuild;
+7. performs an MSI administrative extraction and compares all application
+   files with the validated runtime;
+8. writes an MSI SHA-256 manifest while retaining the `.wixpdb` for diagnostics.
+
+Outputs are written to:
+
+~~~text
+output\x64-shared-release\package\artifacts\
+  DB.Browser.for.SQLCipher-4.0.0-win-x64.msi
+  DB.Browser.for.SQLCipher-4.0.0-win-x64.wixpdb
+
+output\x64-shared-release\package\metadata\msi-manifest.txt
+output\x64-shared-release\package\verify\msi-admin-image\
+~~~
+
+The MSI uses WiX `MajorUpgrade`, rejects downgrades, and detects the historical
+NSIS registry key in HKLM/HKCU 32-bit and 64-bit views. It asks the user to
+uninstall a detected NSIS version first; it never launches an external
+uninstaller from an MSI custom action.
+
+The current Release runtime still contains `vc_redist.x64.exe`. The MSI carries
+it only as an ordinary file and does not execute it. Replacing it with the
+required app-local VC143 runtime DLLs is a release blocker before publishing
+the MSI or portable package; a successful build on a development machine is
+not evidence that a clean machine has the VC Runtime.
+
+## 11. Common build failures
 
 | Symptom | Check |
 | --- | --- |
@@ -306,7 +476,17 @@ finished release archives or installers. Packaging must consume
 | The application reports a missing Qt plugin or DLL | Re-run `cmake --build --preset <debug-or-release>` so the `POST_BUILD` deployment and validation run again |
 | Package assembly rejects a file or hash | Re-run the matching product build and `package-*` workflow; do not copy the development `bin` manually |
 | The HTTPS smoke test cannot connect | Check network access or set `SQLITEBROWSER_TLS_SMOKE_URL` to an approved reachable HTTPS endpoint |
+| ZIP validation rejects the archive | Do not edit the ZIP manually; rebuild it with `zip-release` so it is regenerated from the validated runtime |
+| Portable SFX cannot find NSIS | Install NSIS 3.12 at `C:\Program Files (x86)\NSIS`; the build intentionally does not search custom paths or download tools |
+| Portable SFX rejects the destination | Select a new or empty user-writable subdirectory; roots, system trees, files, and non-empty directories are intentionally refused |
+| Silent portable extraction ignores `/D=` | Keep `/D=<path>` unquoted and as the final argument; use a `.cmd` wrapper when another launcher rewrites quoting |
+| MSI build reports WIX7015 | Review the WiX 7 OSMF EULA and have an authorised developer run the documented `AcceptEula` target; the project intentionally cannot bypass it |
+| WiX restore cannot reach NuGet | Check access to `https://api.nuget.org/v3/index.json`; do not change the locked WiX version to work around a network failure |
+| MSI validation warns about `vc_redist.x64.exe` | Expected for the current intermediate runtime; replace it with app-local VC143 DLLs before publishing |
 
 For the consolidated architecture, implementation history, validation results,
 dependency boundaries, and troubleshooting guide, see the
 [Windows v4 build upgrade report](../.agents/reports/sqlitebrowser-v4.0.0-upgrade-summary.md).
+For the current ZIP, portable NSIS SFX, WiX MSI, and legacy-install migration
+decisions, see the
+[Windows packaging plan](../.agents/reports/sqlitebrowser-v4.0.0-windows-packaging-plan.md).

@@ -301,7 +301,8 @@ do not describe this branch.
 ### Windows v4 branch
 
 For prerequisites, dependency build order, local Preset setup, application
-builds, tests, package runtime assembly, and troubleshooting, follow the
+builds, tests, package runtime assembly, ZIP, portable self-extracting EXE,
+WiX MSI creation, and troubleshooting, follow the
 [Windows v4 build guide](docs/windows-v4-build-guide.md).
 
 For AI-assisted Brotli, zlib, zstd, OpenSSL, and SQLCipher workflows, see the

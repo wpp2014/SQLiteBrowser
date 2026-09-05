@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.30.3)
 
 project(sqlitebrowser
-    VERSION 3.13.99
+    VERSION 4.0.0
     DESCRIPTION "GUI editor for SQLite databases"
     LANGUAGES CXX
 )
@@ -413,6 +413,43 @@ if(SQLITEBROWSER_DEPLOY_RUNTIME)
             RUNTIME_TARGET sqlitebrowser_package_runtime
         )
     endif()
+
+    if(TARGET sqlitebrowser_runtime_smoke)
+        include(cmake/SQLiteBrowserZip.cmake)
+        sqlitebrowser_add_windows_zip(
+            TARGET ${PROJECT_NAME}
+            RUNTIME_TARGET sqlitebrowser_runtime_smoke
+            RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+            MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+            SMOKE_TARGET sqlitebrowser-runtime-smoke-tool
+            TLS_URL "${SQLITEBROWSER_TLS_SMOKE_URL}"
+            SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+
+        include(cmake/SQLiteBrowserPortableSfx.cmake)
+        sqlitebrowser_add_windows_portable_sfx(
+            TARGET ${PROJECT_NAME}
+            RUNTIME_TARGET sqlitebrowser_runtime_smoke
+            RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+            MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+            SMOKE_TARGET sqlitebrowser-runtime-smoke-tool
+            TLS_URL "${SQLITEBROWSER_TLS_SMOKE_URL}"
+            NSIS_SCRIPT
+                "${CMAKE_CURRENT_SOURCE_DIR}/installer/windows/nsis/portable-sfx.nsi"
+            SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+
+        include(cmake/SQLiteBrowserWix.cmake)
+        sqlitebrowser_add_windows_msi(
+            TARGET ${PROJECT_NAME}
+            RUNTIME_TARGET sqlitebrowser_runtime_smoke
+            RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+            MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+            WIX_PROJECT
+                "${CMAKE_CURRENT_SOURCE_DIR}/installer/windows/wix/SQLiteBrowser.Installer.wixproj"
+            SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+    endif()
 endif()
 
 include(config/install.cmake)
@@ -433,9 +470,6 @@ if(APPLE)
     set(CPACK_DEFAULT_GEN TBZ2)
 elseif(WIN32)
     set(CPACK_DEFAULT_GEN ZIP)
-    set(CPACK_NSIS_MODIFY_PATH ON)
-    set(CPACK_WIX_CMAKE_PACKAGE_REGISTRY ON)
-    set(CPACK_WIX_UPGRADE_GUID "78c885a7-e9c8-4ded-9b62-9abe47466950")
 elseif(UNIX)
     set(CPACK_DEFAULT_GEN DEB)
     set(CPACK_SET_DESTDIR 1)

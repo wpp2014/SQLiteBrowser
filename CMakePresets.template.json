@@ -127,6 +127,27 @@
       "configuration": "Release",
       "targets": ["sqlitebrowser_runtime_smoke"],
       "jobs": 0
+    },
+    {
+      "name": "zip-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_zip"],
+      "jobs": 0
+    },
+    {
+      "name": "portable-sfx-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_portable_sfx"],
+      "jobs": 0
+    },
+    {
+      "name": "msi-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_msi"],
+      "jobs": 0
     }
   ],
   "testPresets": [
@@ -237,6 +258,48 @@
         {
           "type": "build",
           "name": "runtime-smoke-release"
+        }
+      ]
+    },
+    {
+      "name": "zip-release",
+      "displayName": "Configure, smoke-test, build, and verify the Release x64 ZIP",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "zip-release"
+        }
+      ]
+    },
+    {
+      "name": "portable-sfx-release",
+      "displayName": "Configure, smoke-test, build, and verify the Release x64 portable SFX",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "portable-sfx-release"
+        }
+      ]
+    },
+    {
+      "name": "msi-release",
+      "displayName": "Configure, smoke-test, build, and verify the Release x64 MSI",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "msi-release"
         }
       ]
     }

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+      Name="$(ProductName)"
+      Manufacturer="$(Manufacturer)"
+      Version="$(PackageVersion)"
+      UpgradeCode="$(UpgradeCode)"
+      Language="1033"
+      Scope="perMachine"
+      InstallerVersion="500"
+      Compressed="yes">
+
+    <SummaryInformation
+        Description="$(ProductName) $(PackageVersion) x64 installer"
+        Manufacturer="$(Manufacturer)" />
+
+    <MajorUpgrade
+        Schedule="afterInstallInitialize"
+        DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="$(ProductName)" />
+    </StandardDirectory>
+
+    <!--
+      The CMake packaging target validates runtime-manifest.txt before WiX is
+      invoked. WiX may only harvest this one validated Release directory.
+    -->
+    <Files Include="$(PayloadRoot)\**" Directory="INSTALLFOLDER" />
+
+    <Icon Id="ProductIcon" SourceFile="$(SourceRoot)\src\iconwin.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
+    <Property Id="ARPCOMMENTS"
+              Value="Visual editor for SQLite databases with SQLCipher support." />
+    <Property Id="ARPHELPLINK"
+              Value="https://github.com/wpp2014/SQLiteBrowser/issues" />
+    <Property Id="ARPURLINFOABOUT"
+              Value="https://github.com/wpp2014/SQLiteBrowser" />
+    <Property Id="ARPURLUPDATEINFO"
+              Value="https://github.com/wpp2014/SQLiteBrowser/releases" />
+    <SetProperty Id="ARPINSTALLLOCATION"
+                 Value="[INSTALLFOLDER]"
+                 After="CostFinalize" />
+
+    <!--
+      Historical NSIS installers wrote their installation directory to the
+      default value of this product key. Detect all relevant registry views,
+      but never execute the external uninstaller from the MSI transaction.
+    -->
+    <Property Id="LEGACY_NSIS_HKLM32">
+      <RegistrySearch
+          Root="HKLM"
+          Key="Software\DB Browser for SQLite Team\DB Browser for SQLite"
+          Type="raw"
+          Bitness="always32" />
+    </Property>
+    <Property Id="LEGACY_NSIS_HKLM64">
+      <RegistrySearch
+          Root="HKLM"
+          Key="Software\DB Browser for SQLite Team\DB Browser for SQLite"
+          Type="raw"
+          Bitness="always64" />
+    </Property>
+    <Property Id="LEGACY_NSIS_HKCU32">
+      <RegistrySearch
+          Root="HKCU"
+          Key="Software\DB Browser for SQLite Team\DB Browser for SQLite"
+          Type="raw"
+          Bitness="always32" />
+    </Property>
+    <Property Id="LEGACY_NSIS_HKCU64">
+      <RegistrySearch
+          Root="HKCU"
+          Key="Software\DB Browser for SQLite Team\DB Browser for SQLite"
+          Type="raw"
+          Bitness="always64" />
+    </Property>
+
+    <Launch
+        Condition="Installed OR ACTION = &quot;ADMIN&quot; OR NOT (LEGACY_NSIS_HKLM32 OR LEGACY_NSIS_HKLM64 OR LEGACY_NSIS_HKCU32 OR LEGACY_NSIS_HKCU64)"
+        Message="An older NSIS-based DB Browser installation was detected. Uninstall it from Windows Apps &amp; features, then run this MSI again." />
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf"
+                 Value="$(SourceRoot)\installer\windows\license.rtf" />
+    <WixVariable Id="WixUIBannerBmp"
+                 Value="$(SourceRoot)\installer\windows\banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp"
+                 Value="$(SourceRoot)\installer\windows\background.bmp" />
+  </Package>
+</Wix>
