@@ -49,6 +49,15 @@ git submodule update --init --recursive
 The final `git submodule update` is intentionally safe to repeat and ensures
 all nested submodules are present at the commits recorded by this repository.
 
+> **Required path rule:** clone the repository into an absolute path containing
+> **no spaces or other whitespace**, for example `F:\open-source\SQLiteBrowser`.
+> Do not use a path such as `F:\open source\SQLiteBrowser`. SQLCipher still uses
+> its upstream `Makefile.msc` for source generation, and that step does not
+> support a source, build, or OpenSSL stage path containing spaces. Because all
+> three paths are below the repository root, a space in the repository path
+> makes the complete dependency build unsupported. The unified script rejects
+> such a path before starting a build.
+
 The main application currently consumes these pinned dependencies:
 
 | Dependency | Version | Required by the main application |
@@ -61,33 +70,69 @@ The main application currently consumes these pinned dependencies:
 
 ## 3. Build and publish the dependency stages
 
-Build the dependencies in this order:
+### Do I need to open a Visual Studio command prompt first?
+
+No. Run the commands in this section from a normal `cmd.exe` window or a
+normal PowerShell window. `third_party\build-all.ps1` delegates to the five
+dependency `build.cmd` scripts, and each script locates Visual Studio 2022 in
+one of the supported default Enterprise, Professional, or Community install
+directories and initialises the MSVC x64 environment with Windows SDK
+10.0.26100.0 itself. Do not call `VsDevCmd.bat` or `vcvars64.bat` manually.
+
+The later CMake Preset application and package workflows can also run from a
+normal command window because the Visual Studio 2022 generator locates the
+configured default installation. The one documented exception is the manual
+WiX 7 EULA acceptance command in section 10: use a **Developer Command Prompt
+for VS 2022** for that one-time direct `msbuild` invocation, unless `msbuild`
+is already available in the current shell.
+
+The five binary dependencies can be checked, built and tested through one
+PowerShell orchestration script. Product builds and tests deliberately remain
+separate invocations:
 
 ~~~cmd
-third_party\brotli\build.cmd check all
-third_party\zlib\build.cmd check all
-third_party\zstd\build.cmd check all
-
-third_party\brotli\build.cmd build all
-third_party\zlib\build.cmd build all
-third_party\zstd\build.cmd build all
-
-third_party\brotli\build.cmd test all
-third_party\zlib\build.cmd test all
-third_party\zstd\build.cmd test all
-
-third_party\openssl\build.cmd check all
-third_party\openssl\build.cmd build all
-third_party\openssl\build.cmd test debug safe
-third_party\openssl\build.cmd test release safe
-
-third_party\sqlcipher\build.cmd check all
-third_party\sqlcipher\build.cmd build all
-third_party\sqlcipher\build.cmd test all
+powershell -NoProfile -ExecutionPolicy Bypass -File third_party\build-all.ps1 -Action Build
+powershell -NoProfile -ExecutionPolicy Bypass -File third_party\build-all.ps1 -Action Test
 
 third_party\aggregate.cmd build all
 third_party\aggregate.cmd check all
 ~~~
+
+The unified script processes zlib, zstd, Brotli, OpenSSL, and SQLCipher in that
+deterministic order for Debug and Release by default. `Build` compiles only
+product targets, publishes each dependency to its private
+configuration-specific stage, writes `build-manifest.txt`, and verifies the
+staged artifacts. It never compiles or runs test-only targets. `Test` requires
+those matching stages to exist, then runs zlib's CTest suite, the Brotli and
+zstd shared-library smoke tests, OpenSSL's safe suite plus its focused Brotli
+integration tests, and SQLCipher's provider smoke and staged-product probes.
+The SQLCipher Tcl suite is not run. The default OpenSSL `Safe` mode excludes
+`test_bio_dgram`; select `-OpenSSLTestMode Full` only on a machine where the
+IPv6 UDP preflight succeeds.
+
+Do not use the complete `Check` action as the first command after a fresh
+clone. It intentionally validates dependency stages as well as tools: OpenSSL
+requires an existing matching Brotli stage, and SQLCipher requires an existing
+matching OpenSSL stage. The `Build` action performs the necessary checks in
+dependency order. To validate an already built five-library stage set without
+rebuilding it, run:
+
+~~~cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File third_party\build-all.ps1 -Action Check
+~~~
+
+To build or test a subset, pass explicit selections. OpenSSL must still have a
+matching Brotli stage when Brotli is omitted from the selected dependencies:
+
+~~~cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File third_party\build-all.ps1 -Action Build -Configuration Release -Dependency Brotli,OpenSSL,SQLCipher
+powershell -NoProfile -ExecutionPolicy Bypass -File third_party\build-all.ps1 -Action Test -Configuration Release -Dependency Brotli,OpenSSL,SQLCipher
+~~~
+
+This subset preserves the required Brotli to OpenSSL to SQLCipher dependency
+chain. The script does not aggregate the public application dependency tree;
+run the `aggregate.cmd` commands shown above after all five private stages
+exist.
 
 The dependency `build` actions create only product stages and record tests as
 `not run`. The three compression-library `test` actions build only their test

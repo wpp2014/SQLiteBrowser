@@ -12,7 +12,9 @@
 
 仓库提供五个依赖构建 Skill，帮助 Codex 或 Claude Code 根据开发者意图选择正确的仓库脚本、监控构建和测试，并解释 stage 与 manifest 验证结果。
 
-Skill 不是第二套构建系统。每个依赖的 `third_party\<dependency>\build.cmd` 才是命令和构建行为的唯一事实来源。Skill 不应临时重写 CMake、NMake 或验证流程。
+Skill 不是第二套构建系统。每个依赖的 `third_party\<dependency>\build.cmd` 才是命令和构建行为的唯一事实来源。Skill 不应临时重写 CMake、NMake 或验证流程。人工批量处理 zlib、zstd、Brotli、OpenSSL 和 SQLCipher 时，可以使用 `third_party\build-all.ps1` 编排这些脚本；其 `Build` 与 `Test` 操作必须分两次调用。该脚本可从普通 `cmd.exe` 或 PowerShell 启动，无需预先打开 VS Developer Command Prompt，也无需手动调用 `VsDevCmd.bat`；各依赖脚本会自行定位默认目录下的 VS2022 并初始化 x64/MSVC/SDK 环境。
+
+> **路径要求：** 使用统一脚本构建 SQLCipher 时，仓库绝对路径不能包含空格或其他空白字符。SQLCipher 的上游 `Makefile.msc` 源码生成步骤不支持带空格的源码、构建或 OpenSSL stage 路径；统一脚本会在开始构建前拒绝此类路径。
 
 完整的人工构建顺序见 [Windows v4 build guide](windows-v4-build-guide.md)，构建架构和历史验收见 [Windows v4 build upgrade report](../.agents/reports/sqlitebrowser-v4.0.0-upgrade-summary.md)。
 

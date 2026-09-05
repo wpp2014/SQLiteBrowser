@@ -136,7 +136,7 @@ Debug 与 Release package runtime 当前都包含 70 个文件。`windeployqt` �
 
 ## 5. 从新克隆到完整验证
 
-以下命令是当前正式顺序，均从仓库根目录的普通 `cmd.exe` 执行。
+以下命令是当前正式顺序，均从仓库根目录的普通 `cmd.exe` 或 PowerShell 执行。无需预先打开 VS Developer Command Prompt，也不要手动调用 `VsDevCmd.bat` 或 `vcvars64.bat`：五个依赖 `build.cmd` 会自行定位默认安装目录下的 VS2022 并初始化 x64、MSVC v143 和 Windows SDK 10.0.26100.0，CMake Preset 则通过 Visual Studio 2022 generator 定位工具链。唯一例外是一次性的 WiX 7 EULA `msbuild` 命令；除非当前 shell 已能直接找到 `msbuild`，该命令应在 Developer Command Prompt for VS 2022 中运行。
 
 ### 5.1 初始化
 
@@ -148,33 +148,23 @@ git submodule update --init --recursive
 
 ### 5.2 检查、构建和测试依赖
 
+**仓库绝对路径不得包含空格或其他空白字符。** SQLCipher 的上游 `Makefile.msc` 源码生成步骤不支持带空格的源码、构建或 OpenSSL stage 路径。统一脚本会在开始构建前检查仓库根目录并立即拒绝不受支持的路径。
+
 ```cmd
-third_party\brotli\build.cmd check all
-third_party\zlib\build.cmd check all
-third_party\zstd\build.cmd check all
-
-third_party\brotli\build.cmd build all
-third_party\zlib\build.cmd build all
-third_party\zstd\build.cmd build all
-
-third_party\brotli\build.cmd test all
-third_party\zlib\build.cmd test all
-third_party\zstd\build.cmd test all
-
-third_party\openssl\build.cmd check all
-third_party\openssl\build.cmd build all
-third_party\openssl\build.cmd test debug safe
-third_party\openssl\build.cmd test release safe
-
-third_party\sqlcipher\build.cmd check all
-third_party\sqlcipher\build.cmd build all
-third_party\sqlcipher\build.cmd test all
+powershell -NoProfile -ExecutionPolicy Bypass -File third_party\build-all.ps1 -Action Build
+powershell -NoProfile -ExecutionPolicy Bypass -File third_party\build-all.ps1 -Action Test
 
 third_party\aggregate.cmd build all
 third_party\aggregate.cmd check all
 ```
 
-`build` 只生成产品和 `build-manifest.txt`，不隐式运行测试。`test` 只构建测试专用目标，并在成功后生成绑定当前 build manifest 的 `test-manifest.txt`。
+统一脚本按 zlib、zstd、Brotli、OpenSSL、SQLCipher 的顺序编排五个私有依赖 stage；五库公共聚合仍使用后续独立命令。`Build` 只生成、发布并验证产品 stage 和 `build-manifest.txt`，不会隐式运行测试。`Test` 是独立调用，只构建测试专用目标，并在成功后生成绑定当前 build manifest 的 `test-manifest.txt`。OpenSSL 默认使用 `Safe` 模式，SQLCipher 只运行 provider smoke、CTest 与 staged-product probe，不运行 Tcl 套件。
+
+全新 clone 后直接运行 `Build`，由每个依赖在正确顺序中完成工具链和上游 stage 检查。完整的 `Check` 会验证已有的 Brotli 与 OpenSSL stage，因此只适合在五库 stage 已经构建完成后执行：
+
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File third_party\build-all.ps1 -Action Check
+```
 
 ### 5.3 创建本地 Preset
 
