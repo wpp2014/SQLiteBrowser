@@ -11,7 +11,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
-    <DefineConstants>PayloadRoot=$(PayloadRoot);PackageVersion=$(PackageVersion);ProductName=$(ProductName);Manufacturer=$(Manufacturer);UpgradeCode=$(UpgradeCode);SourceRoot=$(SourceRoot)</DefineConstants>
+    <DefineConstants>PayloadRoot=$(PayloadRoot);PackageVersion=$(PackageVersion);ProductName=$(ProductName);Manufacturer=$(Manufacturer);UpgradeCode=$(UpgradeCode);AppName=$(AppName);SourceRoot=$(SourceRoot)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -35,6 +35,8 @@
            Text="Manufacturer is required." />
     <Error Condition="'$(UpgradeCode)' == ''"
            Text="UpgradeCode is required." />
+    <Error Condition="'$(AppName)' == ''"
+           Text="AppName is required." />
     <Error Condition="'$(PackageOutput)' == ''"
            Text="PackageOutput is required." />
     <Error Condition="'$(WixIntermediateRoot)' == ''"

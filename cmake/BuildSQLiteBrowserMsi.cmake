@@ -221,6 +221,7 @@ execute_process(
         "-p:ProductName=${SQLITEBROWSER_MSI_PRODUCT_NAME}"
         "-p:Manufacturer=${SQLITEBROWSER_MSI_MANUFACTURER}"
         "-p:UpgradeCode=${SQLITEBROWSER_MSI_UPGRADE_CODE}"
+        "-p:AppName=${SQLITEBROWSER_MSI_APP_NAME}"
         "-p:WixSdkVersion=${SQLITEBROWSER_MSI_WIX_VERSION}"
         "-p:PackageOutput=${SQLITEBROWSER_MSI_ARTIFACT_DIR}"
         "-p:WixIntermediateRoot=${SQLITEBROWSER_MSI_WORK_DIR}"

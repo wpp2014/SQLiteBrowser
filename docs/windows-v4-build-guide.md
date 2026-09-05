@@ -502,6 +502,12 @@ NSIS registry key in HKLM/HKCU 32-bit and 64-bit views. It asks the user to
 uninstall a detected NSIS version first; it never launches an external
 uninstaller from an MSI custom action.
 
+The per-machine installation creates an all-users Start Menu shortcut inside a
+`DB Browser for SQLCipher` product folder and an all-users desktop shortcut.
+Both target the installed application and use the executable's embedded icon.
+Repair, major upgrade, and uninstall validation must include these shortcuts;
+uninstall must also remove the now-empty Start Menu product folder.
+
 The publication runtime explicitly excludes `vc_redist.x64.exe`, so ZIP, SFX,
 and MSI do not distribute or execute the redistributable installer. No
 app-local VC143 runtime is currently added in its place. A clean machine must

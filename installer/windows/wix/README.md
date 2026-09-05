@@ -30,3 +30,8 @@ output/x64-shared-release/package/
 The MSI is x64, Release-only, and per-machine. If a historical NSIS installation
 is detected, the MSI asks the user to uninstall it first; it never executes an
 external uninstaller as a Windows Installer custom action.
+
+A successful installation creates an all-users Start Menu shortcut under the
+`DB Browser for SQLCipher` product folder and an all-users desktop shortcut.
+Both shortcuts target the installed application and use its embedded icon. The
+Start Menu product folder is removed when the shortcut component is uninstalled.
