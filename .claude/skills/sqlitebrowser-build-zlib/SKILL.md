@@ -1,6 +1,6 @@
 ---
 name: sqlitebrowser-build-zlib
-description: Build, test, verify, and stage the repository-pinned zlib 1.3.2 on Windows x64 with Visual Studio 2022 and SDK 10.0.22621.0. Use for zlib environment checks, Debug or Release builds, CTest runs, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, minizip/contrib builds, static zlib, or non-Windows targets.
+description: Build, test, verify, and stage the repository-pinned zlib 1.3.2 on Windows x64 with Visual Studio 2022 and SDK 10.0.26100.0. Use for zlib environment checks, Debug or Release builds, CTest runs, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, minizip/contrib builds, static zlib, or non-Windows targets.
 ---
 
 # SQLiteBrowser zlib Build

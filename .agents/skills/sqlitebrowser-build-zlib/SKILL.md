@@ -36,7 +36,7 @@ The build action compiles only `zlib`, stages product artifacts, and marks tests
 
 ## Execute and monitor
 
-1. Read `docs/upgrade/v4.0.0/zlib-vs2022-build-analysis.md` when build policy, output layout, usage, or troubleshooting detail is needed.
+1. Read `.agents/reports/sqlitebrowser-v4.0.0-upgrade-summary.md` when build policy, output layout, usage, or troubleshooting detail is needed.
 2. Run the selected repository script command.
 3. Surface prerequisite failures exactly: source revision or dirty state, CMake/CTest, Visual Studio edition, SDK, MSVC tools, or PowerShell.
 4. Do not install missing tools, modify PATH permanently, or substitute a system zlib.

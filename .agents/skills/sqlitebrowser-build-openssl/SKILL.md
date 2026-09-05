@@ -48,7 +48,7 @@ The build action never runs tests. Do not add no-tests to Configure because the 
 
 ## Execute and monitor
 
-1. Read docs/upgrade/v4.0.0/openssl-build-automation-guide.md when usage, layout, deployment, or troubleshooting detail is needed.
+1. Read `.agents/reports/sqlitebrowser-v4.0.0-upgrade-summary.md` when usage, layout, deployment, or troubleshooting detail is needed.
 2. Run the selected repository command.
 3. Surface prerequisite failures exactly: VS edition, SDK, Perl, NASM, Git, MSVC tools, source revision, or matching Brotli stage.
 4. During tests, track the last recipe. A quiet stress test is not automatically a hang; inspect processes and network state before terminating.

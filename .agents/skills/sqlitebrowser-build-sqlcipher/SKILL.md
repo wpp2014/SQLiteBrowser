@@ -36,7 +36,7 @@ Defaults are `build all`. Configuration-only invocations remain compatible with 
 - `test` requires a valid existing product stage, builds the excluded `sqlcipher_cli` target, runs CTest and staged-product probes, and writes a test manifest bound to the current build manifest.
 - `clean` removes only the selected SQLCipher private build directory. Use it only when the user selected it or approved deletion.
 
-Read `docs/upgrade/v4.0.0/sqlcipher-build-automation-guide.md` when command, output, manifest, dependency, deployment, or troubleshooting details are needed.
+Read `.agents/reports/sqlitebrowser-v4.0.0-upgrade-summary.md` when command, output, manifest, dependency, deployment, or troubleshooting details are needed.
 
 ## Require the matching OpenSSL stage
 

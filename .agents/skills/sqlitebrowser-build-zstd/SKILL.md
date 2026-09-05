@@ -37,7 +37,7 @@ The build action compiles only `libzstd_shared`, stages product artifacts, and m
 
 ## Execute and monitor
 
-1. Read `docs/upgrade/v4.0.0/zstd-vs2022-build-analysis.md` when build policy, output layout, manifest fields, or troubleshooting detail is needed.
+1. Read `.agents/reports/sqlitebrowser-v4.0.0-upgrade-summary.md` when build policy, output layout, manifest fields, or troubleshooting detail is needed.
 2. Run the selected repository script command.
 3. Surface prerequisite failures exactly: source revision or dirty state, CMake/CTest, Visual Studio edition, SDK, MSVC tools, PowerShell, or certutil.
 4. Do not install missing tools, modify PATH permanently, or substitute a system zstd.

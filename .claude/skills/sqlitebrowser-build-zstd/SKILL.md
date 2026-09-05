@@ -1,6 +1,6 @@
 ---
 name: sqlitebrowser-build-zstd
-description: Build, test, verify, and stage the repository-pinned zstd 1.5.7 on Windows x64 with Visual Studio 2022 and SDK 10.0.22621.0. Use for zstd environment checks, Debug or Release builds, shared-DLL smoke tests, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, static/CLI/contrib builds, optional zlib/LZMA/LZ4 compatibility, OpenSSL integration claims, or non-Windows targets.
+description: Build, test, verify, and stage the repository-pinned zstd 1.5.7 on Windows x64 with Visual Studio 2022 and SDK 10.0.26100.0. Use for zstd environment checks, Debug or Release builds, shared-DLL smoke tests, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, static/CLI/contrib builds, optional zlib/LZMA/LZ4 compatibility, OpenSSL integration claims, or non-Windows targets.
 ---
 
 # SQLiteBrowser zstd Build

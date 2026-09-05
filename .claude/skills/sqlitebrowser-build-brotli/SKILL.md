@@ -1,6 +1,6 @@
 ---
 name: sqlitebrowser-build-brotli
-description: Build, test, verify, and stage the repository-pinned Brotli 1.2.0 on Windows x64 with Visual Studio 2022 and SDK 10.0.22621.0. Use for Brotli environment checks, Debug or Release builds, shared-DLL smoke tests, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, static/CLI builds, OpenSSL integration claims, or non-Windows targets.
+description: Build, test, verify, and stage the repository-pinned Brotli 1.2.0 on Windows x64 with Visual Studio 2022 and SDK 10.0.26100.0. Use for Brotli environment checks, Debug or Release builds, shared-DLL smoke tests, artifact verification, or staging in this SQLiteBrowser repository; do not use for system-wide installation, static/CLI builds, OpenSSL integration claims, or non-Windows targets.
 ---
 
 # SQLiteBrowser Brotli Build
