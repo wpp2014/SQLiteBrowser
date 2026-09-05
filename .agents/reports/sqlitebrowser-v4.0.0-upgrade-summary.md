@@ -132,7 +132,7 @@ output/x64-shared-<config>/
 - 单元测试、runtime-smoke tool；
 - `openssl.exe`、`sqlcipher.exe`、provider/engine 或 `vc143.pdb`。
 
-Release 额外包含 `vc_redist.x64.exe`。每次组装会拒绝缺失文件、额外文件、Debug/Release 混用和非法路径，并生成逐文件 SHA-256 manifest。
+Debug 与 Release package runtime 当前都包含 70 个文件。`windeployqt` 生成的 Release development `bin` 可以保留 `vc_redist.x64.exe`，但发布 allowlist 明确排除该安装器。每次组装会拒绝缺失文件、额外文件、Debug/Release 混用和非法路径，并生成逐文件 SHA-256 manifest。
 
 ## 5. 从新克隆到完整验证
 
@@ -302,7 +302,7 @@ Skill 只负责选择命令、监控和解释结果。仅要求分析时不得�
 | SQLCipher provider smoke | 1/1 通过 | 1/1 通过 |
 | 主程序单元测试 | 4/4 通过 | 4/4 通过 |
 | Development `bin` | 89 个文件 | 90 个文件 |
-| Package runtime | 70 个文件 | 71 个文件 |
+| Package runtime | 70 个文件 | 70 个文件 |
 
 其他验收结果：
 

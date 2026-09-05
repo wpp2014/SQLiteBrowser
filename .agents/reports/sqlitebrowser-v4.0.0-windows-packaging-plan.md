@@ -102,7 +102,7 @@ DB.Browser.for.SQLCipher-4.0.0-win-x64-portable.exe
 output/x64-shared-release/package/runtime/
 ```
 
-它由显式 allowlist 组装，当前包含 71 个文件。每个相对路径及 SHA-256 写入：
+它由显式 allowlist 组装，当前包含 70 个文件。每个相对路径及 SHA-256 写入：
 
 ```text
 output/x64-shared-release/package/metadata/runtime-manifest.txt
@@ -151,16 +151,18 @@ output/x64-shared-release/package/
 
 ### 5.1 Visual C++ Runtime
 
-当前 71 文件 runtime 包含 `vc_redist.x64.exe`。ZIP、SFX 和 MSI 只把它作为普通文件
-携带，不会执行，因此目前产物不能据此宣称在没有 VC Runtime 的干净机器上一定
-可运行。
+当前 70 文件 package runtime 明确排除 `vc_redist.x64.exe`。该文件仍可由
+`windeployqt` 保留在 Release development `bin`，但 ZIP、SFX 和 MSI 均不会分发
+或执行它。
 
-正式发布前推荐改为 app-local VC143 Runtime：
+移除 redistributable 安装器不等于已经部署 VC Runtime。当前 package 也没有加入
+app-local VC143 DLL，因此干净机器仍需预先安装兼容的 Visual C++ Runtime。若目标是
+真正解压即运行，正式发布前推荐增加 app-local VC143 Runtime：
 
 1. 只从当前 VS2022 redist 确定 Release 所需 DLL；
 2. 禁止复制 Debug CRT；
 3. Windows 10/11 继续使用系统 UCRT；
-4. 从 allowlist 删除 `vc_redist.x64.exe`，加入实际 app-local DLL；
+4. 保持 `vc_redist.x64.exe` 在发布 denylist 中，只加入实际 app-local DLL；
 5. manifest 记录路径、文件版本和 SHA-256；
 6. 在不含 VS/Qt/依赖开发环境的干净机复验。
 
@@ -223,12 +225,12 @@ sqlitebrowser
 4. 生成唯一顶层目录 `DB Browser for SQLCipher`；
 5. 原子发布 ZIP；
 6. 解压到独立 `package/verify/zip`；
-7. 再次比较全部 71 个相对路径和 SHA-256；
+7. 再次比较全部 70 个相对路径和 SHA-256；
 8. 从解压副本运行受限 `PATH` 的应用启动、SQLCipher、OpenSSL Brotli 和 Qt
    OpenSSL HTTPS smoke；
 9. 写入 `.zip.sha256` 和 `zip-manifest.txt`。
 
-2026-09-05 本机结果：ZIP 构建、解包、71 文件哈希以及四项 smoke 全部通过。
+2026-09-05 本机结果：ZIP 构建、解包、70 文件哈希以及四项 smoke 全部通过。
 
 ### 6.2 “绿色”的准确含义
 
@@ -310,7 +312,7 @@ administrative image 中的应用目录再次执行 runtime allowlist 和逐文�
 比较，然后生成 `msi-manifest.txt`。
 
 2026-09-05 本机结果：WiX authoring、Windows Installer validation、管理解包和
-71 文件哈希校验全部通过，WiX 构建为零警告、零错误。
+70 文件哈希校验全部通过，WiX 构建为零警告、零错误。
 
 ## 8. 旧版本检测、升级和卸载
 
@@ -417,7 +419,7 @@ NSIS 的 `/D=` 必须作为最后一个参数。静默模式不弹 MessageBox、
 非空目录；解压阶段错误使用 31–40，便于 CI 定位失败阶段。
 
 2026-09-05 本机结果：生成的约 54.2 MB SFX 已成功静默解压到同时包含空格
-和中文字符的目录；71 个路径与 SHA-256 全部匹配；应用启动、SQLCipher、OpenSSL
+和中文字符的目录；70 个路径与 SHA-256 全部匹配；应用启动、SQLCipher、OpenSSL
 Brotli、Qt OpenSSL HTTPS smoke 均通过；非空目录被拒绝且 sentinel 哈希未改变。
 
 ## 10. 构建入口
@@ -444,7 +446,7 @@ Debug configure 不提供正式 ZIP、MSI 或 SFX target。打包命令必须保
 
 ### 11.1 已自动化
 
-- runtime 只允许 71 个指定文件；
+- runtime 只允许 70 个指定文件，并显式排除 `vc_redist.x64.exe`；
 - 缺失、空文件、额外文件和 manifest 哈希变化立即失败；
 - ZIP 固定唯一顶层目录；
 - ZIP 解包后路径和 SHA-256 与 runtime 完全一致；
@@ -489,7 +491,7 @@ x64 虚拟机至少验证：
 
 ### 阶段 A：补齐公共发布载荷
 
-- 使用 app-local VC143 Runtime 替换 `vc_redist.x64.exe`；
+- 保持排除 `vc_redist.x64.exe`，评估并加入所需 app-local VC143 Runtime；
 - 加入项目和第三方许可证；
 - 增加完整 package inputs、签名状态及 SBOM；
 - 复验 ZIP 和 MSI 仍来自同一个 manifest。
@@ -529,7 +531,7 @@ x64 虚拟机至少验证：
 | --- | --- |
 | 错误 UpgradeCode 影响上游或其他 fork | 用真实 MSI 取证，未确认前不宣称升级兼容 |
 | 打包器重新收集 DLL | ZIP/MSI/SFX 只接受相同 runtime 和 manifest |
-| `vc_redist.x64.exe` 未执行 | 正式发布前迁移 app-local VC143 并做干净机测试 |
+| 发布包缺少 VC Runtime | 保持排除 redistributable installer，正式发布前按需加入 app-local VC143 并做干净机测试 |
 | WiX 许可未经授权 | 脚本不自动接受 EULA，由授权方在每台构建机明确处理 |
 | NuGet/WiX 版本漂移 | 精确版本、lock file、locked restore、受信源 |
 | MSI 执行旧 NSIS uninstaller | 第一版仅检测阻止；自动迁移只能在事务外另行设计 |

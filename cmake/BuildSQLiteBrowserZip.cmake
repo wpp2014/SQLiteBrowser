@@ -178,13 +178,6 @@ _sqlitebrowser_zip_validate_manifest(
     "${SQLITEBROWSER_ZIP_RUNTIME_MANIFEST}"
     _manifest_paths)
 
-if(EXISTS "${SQLITEBROWSER_ZIP_RUNTIME_DIR}/vc_redist.x64.exe")
-    message(WARNING
-        "The current runtime still contains vc_redist.x64.exe. The ZIP will "
-        "carry it as an ordinary file and will not execute it. Replace this "
-        "with an app-local VC143 runtime before a production release.")
-endif()
-
 set(_artifact_base
     "DB.Browser.for.SQLCipher-${SQLITEBROWSER_ZIP_VERSION}-win-x64")
 set(_archive_root_name "DB Browser for SQLCipher")

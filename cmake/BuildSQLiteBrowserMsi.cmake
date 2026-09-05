@@ -195,13 +195,6 @@ if(NOT _actual_paths STREQUAL _sorted_manifest_paths)
         "Release runtime files no longer match runtime-manifest.txt.")
 endif()
 
-if(EXISTS "${SQLITEBROWSER_MSI_RUNTIME_DIR}/vc_redist.x64.exe")
-    message(WARNING
-        "The current runtime still contains vc_redist.x64.exe. The MSI will "
-        "carry it as an ordinary file and will not execute it. Replace this "
-        "with an app-local VC143 runtime before a production release.")
-endif()
-
 file(MAKE_DIRECTORY
     "${SQLITEBROWSER_MSI_ARTIFACT_DIR}"
     "${SQLITEBROWSER_MSI_WORK_DIR}")

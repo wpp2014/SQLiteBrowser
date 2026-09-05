@@ -268,9 +268,11 @@ Each workflow first validates the matching development output, copies an
 explicit runtime allowlist through a temporary directory, rejects extra files,
 and writes a SHA-256 manifest to
 `output\x64-shared-<config>\package\metadata\runtime-manifest.txt`. The current
-Debug and Release allowlists contain 70 and 71 files respectively. Release
-also contains `vc_redist.x64.exe`; Debug is intended only for testing on a
-machine with the matching development toolchain.
+Debug and Release package allowlists both contain 70 files. Although
+`windeployqt` can place `vc_redist.x64.exe` in the Release development `bin`,
+the publication allowlist explicitly excludes it from `package\runtime`.
+Debug is intended only for testing on a machine with the matching development
+toolchain.
 
 Run the complete restricted-`PATH` package smoke suites with:
 
@@ -313,7 +315,7 @@ installer\windows\zip\build.cmd
 
 The workflow creates one fixed `DB Browser for SQLCipher` top-level directory,
 checks every source file against `runtime-manifest.txt`, extracts the finished
-archive into a separate verification directory, compares all 71 files and
+archive into a separate verification directory, compares all 70 files and
 hashes, and runs the restricted-`PATH` startup, SQLCipher, Brotli, TLS, and
 HTTPS smoke checks from the extracted copy.
 
@@ -336,7 +338,7 @@ registry or AppData locations.
 ## 9. Build the Release x64 portable self-extracting EXE
 
 The NSIS package is an extraction-only portable wrapper around the same strict
-71-file Release runtime used by the ZIP and MSI. It does not install a product,
+70-file Release runtime used by the ZIP and MSI. It does not install a product,
 write the registry, create shortcuts or an uninstaller, change `PATH`, request
 administrator rights, or inspect/remove an installed version.
 
@@ -355,7 +357,7 @@ installer\windows\nsis\build.cmd
 The workflow validates and smoke-tests the Release runtime, builds a Unicode
 NSIS executable with forced CRC checking and solid LZMA compression, silently
 extracts it to a path containing spaces and non-ASCII characters, verifies all
-71 paths and hashes, and reruns the startup, SQLCipher, Brotli, TLS, and HTTPS
+70 paths and hashes, and reruns the startup, SQLCipher, Brotli, TLS, and HTTPS
 smoke checks from the extracted directory. A negative test also confirms that
 a non-empty destination is rejected without modifying its sentinel file.
 
@@ -428,7 +430,7 @@ installer\windows\wix\build.cmd
 The workflow:
 
 1. configures and minimally builds the Release x64 application;
-2. assembles the strict 71-file Release package runtime;
+2. assembles the strict 70-file Release package runtime;
 3. runs the restricted-`PATH` startup, SQLCipher, Brotli, TLS, and HTTPS smoke
    checks;
 4. checks every runtime path and SHA-256 against `runtime-manifest.txt`;
@@ -455,11 +457,11 @@ NSIS registry key in HKLM/HKCU 32-bit and 64-bit views. It asks the user to
 uninstall a detected NSIS version first; it never launches an external
 uninstaller from an MSI custom action.
 
-The current Release runtime still contains `vc_redist.x64.exe`. The MSI carries
-it only as an ordinary file and does not execute it. Replacing it with the
-required app-local VC143 runtime DLLs is a release blocker before publishing
-the MSI or portable package; a successful build on a development machine is
-not evidence that a clean machine has the VC Runtime.
+The publication runtime explicitly excludes `vc_redist.x64.exe`, so ZIP, SFX,
+and MSI do not distribute or execute the redistributable installer. No
+app-local VC143 runtime is currently added in its place. A clean machine must
+therefore already have a compatible Visual C++ Runtime until the app-local
+runtime policy is implemented and verified.
 
 ## 11. Common build failures
 
@@ -482,7 +484,7 @@ not evidence that a clean machine has the VC Runtime.
 | Silent portable extraction ignores `/D=` | Keep `/D=<path>` unquoted and as the final argument; use a `.cmd` wrapper when another launcher rewrites quoting |
 | MSI build reports WIX7015 | Review the WiX 7 OSMF EULA and have an authorised developer run the documented `AcceptEula` target; the project intentionally cannot bypass it |
 | WiX restore cannot reach NuGet | Check access to `https://api.nuget.org/v3/index.json`; do not change the locked WiX version to work around a network failure |
-| MSI validation warns about `vc_redist.x64.exe` | Expected for the current intermediate runtime; replace it with app-local VC143 DLLs before publishing |
+| Package validation reports `vc_redist.x64.exe` | Reassemble `package\runtime`; the redistributable installer is forbidden in every published format even if it remains in development `bin` |
 
 For the consolidated architecture, implementation history, validation results,
 dependency boundaries, and troubleshooting guide, see the

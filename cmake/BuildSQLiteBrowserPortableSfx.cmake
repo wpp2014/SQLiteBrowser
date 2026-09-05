@@ -229,13 +229,6 @@ _sqlitebrowser_sfx_validate_manifest(
     "${SQLITEBROWSER_SFX_RUNTIME_MANIFEST}"
     _manifest_paths)
 
-if(EXISTS "${SQLITEBROWSER_SFX_RUNTIME_DIR}/vc_redist.x64.exe")
-    message(WARNING
-        "The current runtime still contains vc_redist.x64.exe. The portable "
-        "SFX will carry it as an ordinary file and will not execute it. "
-        "Replace this with an app-local VC143 runtime before release.")
-endif()
-
 set(_artifact_base
     "DB.Browser.for.SQLCipher-${SQLITEBROWSER_SFX_VERSION}-win-x64-portable")
 set(_sfx_path "${SQLITEBROWSER_SFX_ARTIFACT_DIR}/${_artifact_base}.exe")

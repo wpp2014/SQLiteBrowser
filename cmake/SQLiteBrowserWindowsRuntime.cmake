@@ -66,7 +66,10 @@ function(_sqlitebrowser_runtime_file_list configuration kind app_name output_var
         list(APPEND _runtime_files "translations/qt_${_translation}.qm")
     endforeach()
 
-    if(configuration STREQUAL "Release")
+    # windeployqt places the redistributable installer in the Release
+    # development directory. Keep validating that source output, but never
+    # publish the installer as part of the application runtime.
+    if(configuration STREQUAL "Release" AND kind STREQUAL "DEVELOPMENT")
         list(APPEND _runtime_files "vc_redist.x64.exe")
     endif()
 
@@ -217,6 +220,11 @@ function(_sqlitebrowser_assemble_package_runtime)
         "${_source_dir}" "${_configuration}" DEVELOPMENT "${_app_name}")
     _sqlitebrowser_runtime_file_list(
         "${_configuration}" PACKAGE "${_app_name}" _package_files)
+    list(FIND _package_files "vc_redist.x64.exe" _vc_redist_index)
+    if(NOT _vc_redist_index EQUAL -1)
+        message(FATAL_ERROR
+            "vc_redist.x64.exe must not be included in a published runtime.")
+    endif()
 
     set(_work_root "${_configuration_root}/build/package-runtime")
     set(_next_dir "${_work_root}/next")
@@ -252,6 +260,7 @@ function(_sqlitebrowser_assemble_package_runtime)
         "Architecture: x64"
         "Source kind: validated development output"
         "Runtime policy: strict allowlist"
+        "Publication exclusions: vc_redist.x64.exe"
         "Files:")
     foreach(_relative_path IN LISTS _package_files)
         file(SHA256 "${_package_dir}/${_relative_path}" _file_hash)
