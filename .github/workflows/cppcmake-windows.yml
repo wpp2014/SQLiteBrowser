@@ -61,6 +61,38 @@ jobs:
 
           $submoduleStatus | Write-Host
 
+      - name: Fetch and validate pinned dependency tags
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $dependencies = @(
+            @{ Path = 'third_party/zlib/src'; Tag = 'v1.3.2' }
+            @{ Path = 'third_party/zstd/src'; Tag = 'v1.5.7' }
+            @{ Path = 'third_party/brotli/src'; Tag = 'v1.2.0' }
+            @{ Path = 'third_party/sqlcipher/src'; Tag = 'v4.18.0' }
+            @{ Path = 'third_party/openssl/src'; Tag = 'openssl-3.5.7' }
+          )
+
+          foreach ($dependency in $dependencies) {
+            $tagRef = "refs/tags/$($dependency.Tag)"
+
+            git -C $dependency.Path fetch `
+              --force `
+              --depth=1 `
+              origin `
+              "${tagRef}:${tagRef}"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to fetch $($dependency.Tag) for $($dependency.Path)."
+            }
+
+            $actualTag = git -C $dependency.Path describe --tags --exact-match
+            if ($LASTEXITCODE -ne 0 -or $actualTag -ne $dependency.Tag) {
+              throw "Unexpected tag for $($dependency.Path): $actualTag"
+            }
+
+            Write-Host "$($dependency.Path): $actualTag"
+          }
+
       - name: Install NASM
         run: |
           $ErrorActionPreference = 'Stop'
