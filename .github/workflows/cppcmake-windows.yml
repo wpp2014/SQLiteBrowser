@@ -129,10 +129,43 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
-          modules: qt5compat qtwebengine
+          modules: qt5compat qtimageformats qtpdf qtwebengine
           cache: true
           cache-key-prefix: sqlitebrowser-qt-6.11.1-msvc2022-x64-aqt-dev
           aqtsource: git+https://github.com/miurahr/aqtinstall.git@9e49c82edc6d946db376dec907cca5b4b486eec5
+
+      - name: Validate Qt runtime inputs
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if ([string]::IsNullOrWhiteSpace($env:QT_ROOT_DIR)) {
+            throw 'install-qt-action did not provide QT_ROOT_DIR.'
+          }
+
+          $requiredQtFiles = @(
+            'bin\Qt6Pdf.dll',
+            'plugins\imageformats\qicns.dll',
+            'plugins\imageformats\qpdf.dll',
+            'plugins\imageformats\qtga.dll',
+            'plugins\imageformats\qtiff.dll',
+            'plugins\imageformats\qwbmp.dll',
+            'plugins\imageformats\qwebp.dll'
+          )
+
+          $missingQtFiles = @(
+            foreach ($relativePath in $requiredQtFiles) {
+              $fullPath = Join-Path $env:QT_ROOT_DIR $relativePath
+              if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+                $relativePath
+              }
+            }
+          )
+
+          if ($missingQtFiles.Count -ne 0) {
+            throw "Qt 6.11.1 runtime inputs are missing:`n  $($missingQtFiles -join "`n  ")"
+          }
+
+          Write-Host "Validated $($requiredQtFiles.Count) Qt runtime inputs."
 
       - name: Create local CMake Presets
         run: |
