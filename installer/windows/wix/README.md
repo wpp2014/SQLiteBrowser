@@ -31,7 +31,18 @@ The MSI is x64, Release-only, and per-machine. If a historical NSIS installation
 is detected, the MSI asks the user to uninstall it first; it never executes an
 external uninstaller as a Windows Installer custom action.
 
-A successful installation creates an all-users Start Menu shortcut under the
-`DB Browser for SQLCipher` product folder and an all-users desktop shortcut.
-Both shortcuts target the installed application and use its embedded icon. The
-Start Menu product folder is removed when the shortcut component is uninstalled.
+Interactive installation includes a `Shortcut Options` page after the install
+directory page. Both the all-users Start Menu shortcut and the all-users desktop
+shortcut are selected by default, and the user can disable either one
+independently. Both shortcuts target the installed application and use its
+embedded icon. The Start Menu product folder is removed when its shortcut
+component is uninstalled.
+
+Silent installation keeps both defaults. Deployment tools can disable either
+shortcut explicitly:
+
+```cmd
+msiexec /i DB.Browser.for.SQLCipher-4.0.0-win-x64.msi /qn ^
+  CREATE_DESKTOP_SHORTCUT=0 ^
+  CREATE_START_MENU_SHORTCUT=0
+```

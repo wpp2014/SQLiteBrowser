@@ -28,7 +28,8 @@
     <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="ApplicationProgramsFolder" Name="$(ProductName)">
         <Component Id="StartMenuShortcutComponent"
-                   Guid="*">
+                   Guid="*"
+                   Condition="CREATE_START_MENU_SHORTCUT = &quot;1&quot;">
           <Shortcut
               Id="StartMenuShortcut"
               Name="$(ProductName)"
@@ -52,7 +53,8 @@
 
     <StandardDirectory Id="DesktopFolder">
       <Component Id="DesktopShortcutComponent"
-                 Guid="*">
+                 Guid="*"
+                 Condition="CREATE_DESKTOP_SHORTCUT = &quot;1&quot;">
         <Shortcut
             Id="DesktopShortcut"
             Name="$(ProductName)"
@@ -80,6 +82,12 @@
     <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
     <Property Id="ARPCOMMENTS"
               Value="Visual editor for SQLite databases with SQLCipher support." />
+    <Property Id="CREATE_DESKTOP_SHORTCUT"
+              Value="1"
+              Secure="yes" />
+    <Property Id="CREATE_START_MENU_SHORTCUT"
+              Value="1"
+              Secure="yes" />
     <Property Id="ARPHELPLINK"
               Value="https://github.com/wpp2014/SQLiteBrowser/issues" />
     <Property Id="ARPURLINFOABOUT"
@@ -128,7 +136,7 @@
         Condition="Installed OR ACTION = &quot;ADMIN&quot; OR NOT (LEGACY_NSIS_HKLM32 OR LEGACY_NSIS_HKLM64 OR LEGACY_NSIS_HKCU32 OR LEGACY_NSIS_HKCU64)"
         Message="An older NSIS-based DB Browser installation was detected. Uninstall it from Windows Apps &amp; features, then run this MSI again." />
 
-    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <ui:WixUI Id="SQLiteBrowser_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf"
                  Value="$(SourceRoot)\installer\windows\license.rtf" />
     <WixVariable Id="WixUIBannerBmp"
