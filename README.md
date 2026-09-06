@@ -41,6 +41,7 @@
   - [Nix Packages](#nix-packages)
     - [Flox](#flox)
   - [Compiling](#compiling)
+    - [Windows v4 branch](#windows-v4-branch)
   - [X (Known as Twitter)](#x-known-as-twitter)
   - [Website](#website)
   - [Old project page](#old-project-page)
@@ -292,8 +293,20 @@ Or with the `nix-env` or `nix-shell` commands:
 
 ## Compiling
 
-Instructions for compiling on Windows, macOS, Linux, and FreeBSD are
-in [BUILDING](BUILDING.md).
+The `upgrade/v4.0.0` branch currently supports Windows x64 only. It uses
+Visual Studio 2022, Qt 6.11.1, the repository-pinned dependency sources, and
+CMake Presets. The older cross-platform instructions in [BUILDING](BUILDING.md)
+do not describe this branch.
+
+### Windows v4 branch
+
+For prerequisites, dependency build order, local Preset setup, application
+builds, tests, package runtime assembly, ZIP, portable self-extracting EXE,
+WiX MSI creation, and troubleshooting, follow the
+[Windows v4 build guide](docs/windows-v4-build-guide.md).
+
+For AI-assisted Brotli, zlib, zstd, OpenSSL, and SQLCipher workflows, see the
+[dependency build skills guide](docs/dependency-build-skills-guide.md).
 
 ## X (Known as Twitter)
 

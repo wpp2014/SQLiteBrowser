@@ -1,0 +1,15 @@
+[submodule "openssl"]
+	path = third_party/openssl/src
+	url = https://github.com/openssl/openssl.git
+[submodule "sqlcipher"]
+	path = third_party/sqlcipher/src
+	url = https://github.com/sqlcipher/sqlcipher.git
+[submodule "zlib"]
+	path = third_party/zlib/src
+	url = https://github.com/madler/zlib.git
+[submodule "zstd"]
+	path = third_party/zstd/src
+	url = https://github.com/facebook/zstd.git
+[submodule "brotli"]
+	path = third_party/brotli/src
+	url = https://github.com/google/brotli.git

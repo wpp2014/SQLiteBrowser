@@ -22,14 +22,8 @@ set(SQLB_TSS
     "${CMAKE_SOURCE_DIR}/src/translations/sqlb_zh_TW.ts"
 )
 
-if(SQLB_TSS)
-    # add translations
-    foreach(SQLB_TS ${SQLB_TSS})
-        set_source_files_properties("${SQLB_TS}" PROPERTIES OUTPUT_LOCATION "${CMAKE_SOURCE_DIR}/src/translations")
-    endforeach()
-    if(COMMAND qt_add_translation)
-        qt_add_translation(SQLB_QMS ${SQLB_TSS})
-    else()
-        qt5_add_translation(SQLB_QMS ${SQLB_TSS})
-    endif()
-endif()
+qt_add_translations(${PROJECT_NAME}
+    TS_FILES ${SQLB_TSS}
+    QM_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    RESOURCE_PREFIX "/translations"
+)

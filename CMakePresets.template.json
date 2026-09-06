@@ -1,0 +1,307 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 30,
+    "patch": 3
+  },
+  "configurePresets": [
+    {
+      "name": "windows-x64-base",
+      "hidden": true,
+      "displayName": "Windows x64 base",
+      "description": "Visual Studio 2022, MSVC v143, Windows SDK 10.0.26100.0 and Qt 6.11.1",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "set"
+      },
+      "toolset": {
+        "value": "v143",
+        "strategy": "set"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_VERSION": "10.0.26100.0",
+        "CMAKE_PREFIX_PATH": "REPLACE_WITH_QT_6_11_1_MSVC2022_X64_ROOT",
+        "CMAKE_FIND_PACKAGE_PREFER_CONFIG": "ON",
+        "OPENSSL_USE_STATIC_LIBS": "OFF",
+        "SQLITEBROWSER_DEPENDENCY_SDK_POLICY": "STRICT",
+        "SQLITEBROWSER_DEPLOY_RUNTIME": "ON",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
+        "QT_MAJOR": "Qt6",
+        "sqlcipher": "ON",
+        "ENABLE_TESTING": "ON",
+        "BUILD_SHARED_LIBS": "OFF",
+        "FORCE_INTERNAL_QSCINTILLA": "ON",
+        "FORCE_INTERNAL_QCUSTOMPLOT": "ON",
+        "FORCE_INTERNAL_QHEXEDIT": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "windows-x64-base",
+      "displayName": "Windows x64 shared Debug",
+      "description": "Configure the Debug application tree in the unified Debug output root",
+      "binaryDir": "${sourceDir}/output/x64-shared-debug/build/sqlitebrowser",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Debug",
+        "SQLITEBROWSER_CONFIGURATION_ROOT": "${sourceDir}/output/x64-shared-debug",
+        "OpenSSL_DIR": "${sourceDir}/output/x64-shared-debug/build/openssl/stage/lib/cmake/OpenSSL",
+        "OPENSSL_ROOT_DIR": "${sourceDir}/output/x64-shared-debug/build/openssl/stage",
+        "SQLCIPHER_ROOT_DIR": "${sourceDir}/output/x64-shared-debug/build/sqlcipher/stage"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "windows-x64-base",
+      "displayName": "Windows x64 shared Release",
+      "description": "Configure the Release application tree in the unified Release output root",
+      "binaryDir": "${sourceDir}/output/x64-shared-release/build/sqlitebrowser",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Release",
+        "SQLITEBROWSER_CONFIGURATION_ROOT": "${sourceDir}/output/x64-shared-release",
+        "OpenSSL_DIR": "${sourceDir}/output/x64-shared-release/build/openssl/stage/lib/cmake/OpenSSL",
+        "OPENSSL_ROOT_DIR": "${sourceDir}/output/x64-shared-release/build/openssl/stage",
+        "SQLCIPHER_ROOT_DIR": "${sourceDir}/output/x64-shared-release/build/sqlcipher/stage"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "targets": ["sqlitebrowser"],
+      "jobs": 0
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser"],
+      "jobs": 0
+    },
+    {
+      "name": "unit-tests-debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "targets": ["sqlitebrowser_unit_tests"],
+      "jobs": 0
+    },
+    {
+      "name": "unit-tests-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_unit_tests"],
+      "jobs": 0
+    },
+    {
+      "name": "package-runtime-debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "targets": ["sqlitebrowser_package_runtime"],
+      "jobs": 0
+    },
+    {
+      "name": "package-runtime-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_package_runtime"],
+      "jobs": 0
+    },
+    {
+      "name": "runtime-smoke-debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "targets": ["sqlitebrowser_runtime_smoke"],
+      "jobs": 0
+    },
+    {
+      "name": "runtime-smoke-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_runtime_smoke"],
+      "jobs": 0
+    },
+    {
+      "name": "zip-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_zip"],
+      "jobs": 0
+    },
+    {
+      "name": "portable-sfx-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_portable_sfx"],
+      "jobs": 0
+    },
+    {
+      "name": "msi-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_msi"],
+      "jobs": 0
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "test-debug",
+      "displayName": "Configure, build, and run Debug unit tests",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "unit-tests-debug"
+        },
+        {
+          "type": "test",
+          "name": "debug"
+        }
+      ]
+    },
+    {
+      "name": "test-release",
+      "displayName": "Configure, build, and run Release unit tests",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "unit-tests-release"
+        },
+        {
+          "type": "test",
+          "name": "release"
+        }
+      ]
+    },
+    {
+      "name": "package-debug",
+      "displayName": "Configure and assemble the Debug package runtime",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "package-runtime-debug"
+        }
+      ]
+    },
+    {
+      "name": "package-release",
+      "displayName": "Configure and assemble the Release package runtime",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "package-runtime-release"
+        }
+      ]
+    },
+    {
+      "name": "smoke-debug",
+      "displayName": "Configure, assemble, and smoke-test the Debug package runtime",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "runtime-smoke-debug"
+        }
+      ]
+    },
+    {
+      "name": "smoke-release",
+      "displayName": "Configure, assemble, and smoke-test the Release package runtime",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "runtime-smoke-release"
+        }
+      ]
+    },
+    {
+      "name": "zip-release",
+      "displayName": "Configure, smoke-test, build, and verify the Release x64 ZIP",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "zip-release"
+        }
+      ]
+    },
+    {
+      "name": "portable-sfx-release",
+      "displayName": "Configure, smoke-test, build, and verify the Release x64 portable SFX",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "portable-sfx-release"
+        }
+      ]
+    },
+    {
+      "name": "msi-release",
+      "displayName": "Configure, smoke-test, build, and verify the Release x64 MSI",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "msi-release"
+        }
+      ]
+    }
+  ]
+}

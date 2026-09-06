@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dialog-set wiring derived from WiX Toolset 7.0.0 WixUI_InstallDir.wxs.
+  Copyright (c) .NET Foundation and contributors. Licensed under the
+  Microsoft Reciprocal License.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!--
+    This x64 dialog set follows the WiX 7 WixUI_InstallDir sequence and inserts
+    ShortcutOptionsDlg between InstallDirDlg and VerifyReadyDlg.
+  -->
+  <Fragment>
+    <UI Id="SQLiteBrowser_InstallDir_X64">
+      <Publish Dialog="BrowseDlg"
+               Control="OK"
+               Event="CheckTargetPath"
+               Value="[WIXUI_INSTALLDIR]"
+               Order="1" />
+      <Publish Dialog="InstallDirDlg"
+               Control="Next"
+               Event="CheckTargetPath"
+               Value="[WIXUI_INSTALLDIR]"
+               Order="1" />
+      <Publish Dialog="InstallDirDlg"
+               Control="Next"
+               Event="NewDialog"
+               Value="ShortcutOptionsDlg"
+               Order="4" />
+    </UI>
+
+    <UIRef Id="SQLiteBrowser_InstallDir" />
+  </Fragment>
+
+  <Fragment>
+    <UI Id="SQLiteBrowser_InstallDir">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <DialogRef Id="BrowseDlg" />
+      <DialogRef Id="DiskCostDlg" />
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <Dialog Id="ShortcutOptionsDlg"
+              Width="370"
+              Height="270"
+              Title="[ProductName] Setup">
+        <Control Id="BannerBitmap"
+                 Type="Bitmap"
+                 X="0"
+                 Y="0"
+                 Width="370"
+                 Height="44"
+                 TabSkip="no"
+                 Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine"
+                 Type="Line"
+                 X="0"
+                 Y="44"
+                 Width="370"
+                 Height="0" />
+        <Control Id="BottomLine"
+                 Type="Line"
+                 X="0"
+                 Y="234"
+                 Width="370"
+                 Height="0" />
+        <Control Id="Title"
+                 Type="Text"
+                 X="15"
+                 Y="6"
+                 Width="200"
+                 Height="15"
+                 Transparent="yes"
+                 NoPrefix="yes"
+                 Text="{\WixUI_Font_Title}Shortcut Options" />
+        <Control Id="Description"
+                 Type="Text"
+                 X="25"
+                 Y="23"
+                 Width="280"
+                 Height="15"
+                 Transparent="yes"
+                 NoPrefix="yes"
+                 Text="Choose which application shortcuts to create." />
+        <Control Id="Instruction"
+                 Type="Text"
+                 X="25"
+                 Y="65"
+                 Width="320"
+                 Height="25"
+                 Text="Select the shortcuts that Setup should create for all users of this computer." />
+        <Control Id="DesktopShortcutCheckBox"
+                 Type="CheckBox"
+                 X="35"
+                 Y="105"
+                 Width="300"
+                 Height="17"
+                 CheckBoxValue="1"
+                 Property="CREATE_DESKTOP_SHORTCUT"
+                 Text="Create a shortcut on the desktop" />
+        <Control Id="StartMenuShortcutCheckBox"
+                 Type="CheckBox"
+                 X="35"
+                 Y="130"
+                 Width="300"
+                 Height="17"
+                 CheckBoxValue="1"
+                 Property="CREATE_START_MENU_SHORTCUT"
+                 Text="Create a shortcut in the Start Menu" />
+        <Control Id="Back"
+                 Type="PushButton"
+                 X="180"
+                 Y="243"
+                 Width="56"
+                 Height="17"
+                 Text="&amp;Back">
+          <Publish Event="NewDialog" Value="InstallDirDlg" />
+        </Control>
+        <Control Id="Next"
+                 Type="PushButton"
+                 X="236"
+                 Y="243"
+                 Width="56"
+                 Height="17"
+                 Default="yes"
+                 Text="&amp;Next">
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" />
+        </Control>
+        <Control Id="Cancel"
+                 Type="PushButton"
+                 X="304"
+                 Y="243"
+                 Width="56"
+                 Height="17"
+                 Cancel="yes"
+                 Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <Publish Dialog="ExitDialog"
+               Control="Finish"
+               Event="EndDialog"
+               Value="Return"
+               Order="999" />
+      <Publish Dialog="WelcomeDlg"
+               Control="Next"
+               Event="NewDialog"
+               Value="LicenseAgreementDlg"
+               Condition="NOT Installed" />
+      <Publish Dialog="WelcomeDlg"
+               Control="Next"
+               Event="NewDialog"
+               Value="VerifyReadyDlg"
+               Condition="Installed AND PATCH" />
+      <Publish Dialog="LicenseAgreementDlg"
+               Control="Back"
+               Event="NewDialog"
+               Value="WelcomeDlg" />
+      <Publish Dialog="LicenseAgreementDlg"
+               Control="Next"
+               Event="NewDialog"
+               Value="InstallDirDlg"
+               Condition="LicenseAccepted = &quot;1&quot;" />
+      <Publish Dialog="InstallDirDlg"
+               Control="Back"
+               Event="NewDialog"
+               Value="LicenseAgreementDlg" />
+      <Publish Dialog="InstallDirDlg"
+               Control="Next"
+               Event="SetTargetPath"
+               Value="[WIXUI_INSTALLDIR]"
+               Order="3" />
+      <Publish Dialog="InstallDirDlg"
+               Control="ChangeFolder"
+               Property="_BrowseProperty"
+               Value="[WIXUI_INSTALLDIR]"
+               Order="1" />
+      <Publish Dialog="InstallDirDlg"
+               Control="ChangeFolder"
+               Event="SpawnDialog"
+               Value="BrowseDlg"
+               Order="2" />
+      <Publish Dialog="BrowseDlg"
+               Control="OK"
+               Event="SetTargetPath"
+               Value="[_BrowseProperty]"
+               Order="3" />
+      <Publish Dialog="BrowseDlg"
+               Control="OK"
+               Event="EndDialog"
+               Value="Return"
+               Order="4" />
+      <Publish Dialog="VerifyReadyDlg"
+               Control="Back"
+               Event="NewDialog"
+               Value="ShortcutOptionsDlg"
+               Order="1"
+               Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg"
+               Control="Back"
+               Event="NewDialog"
+               Value="MaintenanceTypeDlg"
+               Order="2"
+               Condition="Installed AND NOT PATCH" />
+      <Publish Dialog="VerifyReadyDlg"
+               Control="Back"
+               Event="NewDialog"
+               Value="WelcomeDlg"
+               Order="2"
+               Condition="Installed AND PATCH" />
+      <Publish Dialog="MaintenanceWelcomeDlg"
+               Control="Next"
+               Event="NewDialog"
+               Value="MaintenanceTypeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg"
+               Control="RepairButton"
+               Event="NewDialog"
+               Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg"
+               Control="RemoveButton"
+               Event="NewDialog"
+               Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg"
+               Control="Back"
+               Event="NewDialog"
+               Value="MaintenanceWelcomeDlg" />
+
+      <Property Id="ARPNOMODIFY" Value="1" />
+    </UI>
+
+    <UIRef Id="WixUI_Common" />
+  </Fragment>
+</Wix>

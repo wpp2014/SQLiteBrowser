@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.30.3)
 
 project(sqlitebrowser
-    VERSION 3.13.99
+    VERSION 4.0.0
     DESCRIPTION "GUI editor for SQLite databases"
     LANGUAGES CXX
 )
@@ -10,32 +10,143 @@ include(GNUInstallDirs)
 
 include(config/options.cmake)
 
+if(NOT WIN32)
+    message(FATAL_ERROR "This v4.0.0 build path currently supports Windows only.")
+endif()
+
+if(NOT MSVC)
+    message(FATAL_ERROR "Visual Studio 2022 with MSVC is required.")
+endif()
+
+if(NOT CMAKE_GENERATOR STREQUAL "Visual Studio 17 2022")
+    message(FATAL_ERROR
+        "Visual Studio 17 2022 is required; actual generator: ${CMAKE_GENERATOR}")
+endif()
+
+if(NOT CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
+    message(FATAL_ERROR
+        "The x64 generator platform is required; actual platform: ${CMAKE_GENERATOR_PLATFORM}")
+endif()
+
+if(NOT CMAKE_VS_PLATFORM_TOOLSET STREQUAL "v143")
+    message(FATAL_ERROR
+        "The v143 platform toolset is required; actual toolset: ${CMAKE_VS_PLATFORM_TOOLSET}")
+endif()
+
+if(NOT CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION STREQUAL "10.0.26100.0")
+    message(FATAL_ERROR
+        "Windows SDK 10.0.26100.0 is required; actual SDK: ${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+endif()
+
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "A 64-bit compiler is required.")
+endif()
+
+if(NOT QT_MAJOR STREQUAL "Qt6")
+    message(FATAL_ERROR "Qt6 is required; actual QT_MAJOR: ${QT_MAJOR}")
+endif()
+
+if(NOT DEFINED SQLITEBROWSER_CONFIGURATION_ROOT
+        OR SQLITEBROWSER_CONFIGURATION_ROOT STREQUAL "")
+    message(FATAL_ERROR
+        "SQLITEBROWSER_CONFIGURATION_ROOT must identify the current unified output root.")
+endif()
+
+cmake_path(ABSOLUTE_PATH SQLITEBROWSER_CONFIGURATION_ROOT
+    BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    NORMALIZE
+    OUTPUT_VARIABLE _sqlitebrowser_configuration_root)
+cmake_path(ABSOLUTE_PATH CMAKE_BINARY_DIR
+    NORMALIZE
+    OUTPUT_VARIABLE _sqlitebrowser_binary_dir)
+set(_sqlitebrowser_expected_binary_dir
+    "${_sqlitebrowser_configuration_root}/build/sqlitebrowser")
+cmake_path(NORMAL_PATH _sqlitebrowser_expected_binary_dir)
+cmake_path(COMPARE
+    "${_sqlitebrowser_binary_dir}"
+    EQUAL
+    "${_sqlitebrowser_expected_binary_dir}"
+    _sqlitebrowser_binary_dir_matches)
+if(NOT _sqlitebrowser_binary_dir_matches)
+    message(FATAL_ERROR
+        "The application binary directory must be "
+        "${_sqlitebrowser_expected_binary_dir}; actual: ${_sqlitebrowser_binary_dir}")
+endif()
+
+foreach(_dependency_aggregate_file IN ITEMS
+        "${_sqlitebrowser_configuration_root}/metadata/dependency-aggregate-manifest.txt"
+        "${_sqlitebrowser_configuration_root}/metadata/dependency-ownership-manifest.txt")
+    if(NOT EXISTS "${_dependency_aggregate_file}")
+        message(FATAL_ERROR
+            "The configuration dependency aggregate is incomplete: "
+            "${_dependency_aggregate_file}\n"
+            "Run third_party\\aggregate.cmd build for this configuration first.")
+    endif()
+endforeach()
+
+set(SQLITEBROWSER_CONFIGURATION_ROOT
+    "${_sqlitebrowser_configuration_root}"
+    CACHE PATH "Current SQLiteBrowser unified output root" FORCE)
+set(SQLITEBROWSER_PUBLIC_BIN_DIR
+    "${SQLITEBROWSER_CONFIGURATION_ROOT}/bin")
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
-add_executable(${PROJECT_NAME})
-
-
-if(QT_MAJOR STREQUAL "Qt5")
-    set(CMAKE_CXX_STANDARD 14)
-elseif(QT_MAJOR STREQUAL "Qt6")
-    set(CMAKE_CXX_STANDARD 17)
-else()
-    message(FATAL_ERROR "Uknown Qt Version: ${QT_MAJOR}")
-endif()
-
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" "${CMAKE_MODULE_PATH}")
 
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Release")
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
 endif()
 
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    WIN32_EXECUTABLE ON
-    MACOSX_BUNDLE ON
+find_package(Qt6 6.11.1 EXACT CONFIG REQUIRED
+    COMPONENTS
+        Concurrent
+        Core5Compat
+        Gui
+        LinguistTools
+        Network
+        PrintSupport
+        Widgets
+        Xml
 )
+
+if(ENABLE_TESTING)
+    find_package(Qt6 6.11.1 EXACT CONFIG REQUIRED COMPONENTS Test)
+endif()
+
+if(NOT TARGET Qt6::windeployqt)
+    message(FATAL_ERROR "Qt6::windeployqt is required but was not provided by the selected Qt package.")
+endif()
+
+message(STATUS "SQLiteBrowser toolchain:")
+message(STATUS "  Generator: ${CMAKE_GENERATOR}")
+message(STATUS "  Platform: ${CMAKE_GENERATOR_PLATFORM}")
+message(STATUS "  Toolset: ${CMAKE_VS_PLATFORM_TOOLSET}")
+message(STATUS "  Windows SDK: ${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+message(STATUS "  Qt: ${Qt6_VERSION}")
+message(STATUS "  Qt package: ${Qt6_DIR}")
+message(STATUS "  Configuration root: ${SQLITEBROWSER_CONFIGURATION_ROOT}")
+message(STATUS "  Application build tree: ${CMAKE_BINARY_DIR}")
+message(STATUS "  Development bin: ${SQLITEBROWSER_PUBLIC_BIN_DIR}")
+
+qt_add_executable(${PROJECT_NAME} WIN32)
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${SQLITEBROWSER_PUBLIC_BIN_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${SQLITEBROWSER_PUBLIC_BIN_DIR}"
+    PDB_OUTPUT_DIRECTORY_DEBUG "${SQLITEBROWSER_PUBLIC_BIN_DIR}"
+    PDB_OUTPUT_DIRECTORY_RELEASE "${SQLITEBROWSER_PUBLIC_BIN_DIR}"
+    MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,Release>:ProgramDatabase>"
+)
+target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/DEBUG>")
+if(MSVC)
+    # Serialize writes to the target compiler PDB when MSBuild schedules
+    # multiple cl.exe processes for the same project.
+    target_compile_options(${PROJECT_NAME} PRIVATE /FS)
+endif()
 
 execute_process(
     COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short --verify HEAD
@@ -60,23 +171,18 @@ endif()
 
 include(config/platform.cmake)
 
-find_package(${QT_MAJOR} REQUIRED COMPONENTS Concurrent Gui LinguistTools Network PrintSupport Test Widgets Xml)
 set(QT_LIBS
-    ${QT_MAJOR}::Gui
-    ${QT_MAJOR}::Test
-    ${QT_MAJOR}::PrintSupport
-    ${QT_MAJOR}::Widgets
-    ${QT_MAJOR}::Network
-    ${QT_MAJOR}::Concurrent
-    ${QT_MAJOR}::Xml
+    Qt6::Gui
+    Qt6::PrintSupport
+    Qt6::Widgets
+    Qt6::Network
+    Qt6::Concurrent
+    Qt6::Xml
+    Qt6::Core5Compat
 )
-if(QT_MAJOR STREQUAL "Qt6")
-    find_package(Qt6 REQUIRED COMPONENTS Core5Compat)
-    list(APPEND QT_LIBS Qt6::Core5Compat)
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        AUTOUIC_OPTIONS "--connections=string"
-    )
-endif()
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    AUTOUIC_OPTIONS "--connections=string"
+)
 
 target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${CMAKE_CURRENT_LIST_DIR}/libs/json)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR} src)
@@ -85,9 +191,8 @@ include(config/3dparty.cmake)
 
 # SQLCipher option
 if(sqlcipher)
-    add_definitions(-DENABLE_SQLCIPHER)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_SQLCIPHER)
     find_package(SQLCipher REQUIRED)
-    include_directories(SYSTEM "${SQLCIPHER_INCLUDE_DIR}/sqlcipher")
     set(LIBSQLITE_NAME SQLCipher::SQLCipher)
 else()
     find_package(SQLite3 REQUIRED)
@@ -262,7 +367,6 @@ target_sources(${PROJECT_NAME}
 
     # Translations
     src/translations/flags/flags.qrc
-    src/translations/translations.qrc
 
     # Styles
     src/qdarkstyle/dark/darkstyle.qrc
@@ -276,6 +380,77 @@ target_link_libraries(${PROJECT_NAME}
     ${LIBSQLITE_NAME}
     ${PLATFORM_LIBS}
 )
+
+if(SQLITEBROWSER_DEPLOY_RUNTIME)
+    if(NOT sqlcipher)
+        message(FATAL_ERROR
+            "SQLITEBROWSER_DEPLOY_RUNTIME requires the staged SQLCipher build.")
+    endif()
+
+    include(cmake/SQLiteBrowserWindowsRuntime.cmake)
+    sqlitebrowser_configure_windows_runtime(
+        TARGET ${PROJECT_NAME}
+        SQLCIPHER_TARGET SQLCipher::SQLCipher
+    )
+
+    set(SQLITEBROWSER_PACKAGE_RUNTIME_DIR
+        "${SQLITEBROWSER_CONFIGURATION_ROOT}/package/runtime")
+    set(SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST
+        "${SQLITEBROWSER_CONFIGURATION_ROOT}/package/metadata/runtime-manifest.txt")
+    sqlitebrowser_add_windows_package_runtime(
+        TARGET ${PROJECT_NAME}
+        RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+        MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+    )
+
+    if(ENABLE_TESTING)
+        sqlitebrowser_add_windows_runtime_smoke(
+            APP_TARGET ${PROJECT_NAME}
+            SQLCIPHER_TARGET SQLCipher::SQLCipher
+            SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/runtime_smoke.cpp"
+            TLS_URL "${SQLITEBROWSER_TLS_SMOKE_URL}"
+            RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+            RUNTIME_TARGET sqlitebrowser_package_runtime
+        )
+    endif()
+
+    if(TARGET sqlitebrowser_runtime_smoke)
+        include(cmake/SQLiteBrowserZip.cmake)
+        sqlitebrowser_add_windows_zip(
+            TARGET ${PROJECT_NAME}
+            RUNTIME_TARGET sqlitebrowser_runtime_smoke
+            RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+            MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+            SMOKE_TARGET sqlitebrowser-runtime-smoke-tool
+            TLS_URL "${SQLITEBROWSER_TLS_SMOKE_URL}"
+            SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+
+        include(cmake/SQLiteBrowserPortableSfx.cmake)
+        sqlitebrowser_add_windows_portable_sfx(
+            TARGET ${PROJECT_NAME}
+            RUNTIME_TARGET sqlitebrowser_runtime_smoke
+            RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+            MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+            SMOKE_TARGET sqlitebrowser-runtime-smoke-tool
+            TLS_URL "${SQLITEBROWSER_TLS_SMOKE_URL}"
+            NSIS_SCRIPT
+                "${CMAKE_CURRENT_SOURCE_DIR}/installer/windows/nsis/portable-sfx.nsi"
+            SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+
+        include(cmake/SQLiteBrowserWix.cmake)
+        sqlitebrowser_add_windows_msi(
+            TARGET ${PROJECT_NAME}
+            RUNTIME_TARGET sqlitebrowser_runtime_smoke
+            RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+            MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+            WIX_PROJECT
+                "${CMAKE_CURRENT_SOURCE_DIR}/installer/windows/wix/SQLiteBrowser.Installer.wixproj"
+            SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+    endif()
+endif()
 
 include(config/install.cmake)
 
@@ -295,9 +470,6 @@ if(APPLE)
     set(CPACK_DEFAULT_GEN TBZ2)
 elseif(WIN32)
     set(CPACK_DEFAULT_GEN ZIP)
-    set(CPACK_NSIS_MODIFY_PATH ON)
-    set(CPACK_WIX_CMAKE_PACKAGE_REGISTRY ON)
-    set(CPACK_WIX_UPGRADE_GUID "78c885a7-e9c8-4ded-9b62-9abe47466950")
 elseif(UNIX)
     set(CPACK_DEFAULT_GEN DEB)
     set(CPACK_SET_DESTDIR 1)

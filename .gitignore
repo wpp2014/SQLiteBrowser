@@ -4,10 +4,25 @@ sqlitebrowser.pro.user
 CMakeLists.txt.user
 CMakeFiles
 *.cmake
+!third_party/sqlcipher/cmake/BuildSQLCipher.cmake
+!cmake/SQLiteBrowserWindowsRuntime.cmake
+!cmake/RunSQLiteBrowserWindowsSmoke.cmake
+!cmake/SQLiteBrowserWix.cmake
+!cmake/BuildSQLiteBrowserMsi.cmake
+!cmake/SQLiteBrowserZip.cmake
+!cmake/BuildSQLiteBrowserZip.cmake
+!cmake/SQLiteBrowserPortableSfx.cmake
+!cmake/BuildSQLiteBrowserPortableSfx.cmake
 *.cxx_parameters
+
+# Local CMake presets may contain developer-specific absolute paths.
+/CMakePresets.json
+/CMakeUserPresets.json
 
 # ignore any build folders
 build*/
+/output/
+/installer/windows/wix/obj/
 # folder with temporary test data
 testdata/
 
