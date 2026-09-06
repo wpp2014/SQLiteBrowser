@@ -229,6 +229,18 @@ jobs:
             throw 'Dependency tests failed.'
           }
 
+      - name: Publish and verify dependency aggregate
+        run: |
+          third_party\aggregate.cmd build release
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Dependency aggregate publication failed.'
+          }
+
+          third_party\aggregate.cmd check release
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Dependency aggregate verification failed.'
+          }
+
       - name: Build and run application unit tests
         run: |
           cmake --workflow --preset test-release
