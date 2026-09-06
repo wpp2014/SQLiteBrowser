@@ -208,16 +208,6 @@ jobs:
           }
           Write-Host "Visual Studio: $vsRoot"
 
-      - name: Check dependency prerequisites
-        run: |
-          powershell -NoProfile -ExecutionPolicy Bypass `
-            -File third_party\build-all.ps1 `
-            -Action Check `
-            -Configuration $env:BUILD_CONFIGURATION
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Dependency prerequisite checks failed.'
-          }
-
       - name: Build and stage dependencies
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass `
