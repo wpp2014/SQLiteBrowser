@@ -786,7 +786,7 @@ exit /b 0
 set "VS_ROOT="
 set "VS_EDITION="
 set "VS_DEVCMD="
-for %%E in (Enterprise Professional Community) do (
+for %%E in (Community Professional Enterprise) do (
     if not defined VS_ROOT if exist "C:\Program Files\Microsoft Visual Studio\2022\%%E\Common7\Tools\VsDevCmd.bat" (
         set "VS_ROOT=C:\Program Files\Microsoft Visual Studio\2022\%%E"
         set "VS_EDITION=%%E"
@@ -794,7 +794,7 @@ for %%E in (Enterprise Professional Community) do (
 )
 if not defined VS_ROOT (
     echo ERROR: Visual Studio 2022 was not found in a supported default directory.
-    echo Checked Enterprise, Professional, and Community under C:\Program Files.
+    echo Checked Community, Professional, and Enterprise under C:\Program Files.
     exit /b 1
 )
 set "VS_DEVCMD=!VS_ROOT!\Common7\Tools\VsDevCmd.bat"

@@ -613,7 +613,7 @@ set "VS_ROOT="
 set "VS_EDITION="
 set "VS_DEVCMD="
 
-for %%E in (Enterprise Professional Community) do (
+for %%E in (Community Professional Enterprise) do (
     if not defined VS_ROOT (
         if exist "C:\Program Files\Microsoft Visual Studio\2022\%%E\Common7\Tools\VsDevCmd.bat" (
             set "VS_ROOT=C:\Program Files\Microsoft Visual Studio\2022\%%E"
@@ -625,9 +625,9 @@ for %%E in (Enterprise Professional Community) do (
 if not defined VS_ROOT (
     echo ERROR: Visual Studio 2022 was not found in a supported default directory.
     echo Checked:
-    echo   C:\Program Files\Microsoft Visual Studio\2022\Enterprise
-    echo   C:\Program Files\Microsoft Visual Studio\2022\Professional
     echo   C:\Program Files\Microsoft Visual Studio\2022\Community
+    echo   C:\Program Files\Microsoft Visual Studio\2022\Professional
+    echo   C:\Program Files\Microsoft Visual Studio\2022\Enterprise
     echo Install Visual Studio 2022 with Desktop development with C++ and SDK !REQUIRED_WINDOWS_SDK!.
     exit /b 1
 )

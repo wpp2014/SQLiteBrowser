@@ -12,7 +12,7 @@ themselves, so a Developer Command Prompt is not required.
 
 | Component | Required configuration |
 | --- | --- |
-| Visual Studio | Visual Studio 2022 Enterprise, Professional, or Community, installed in its default `C:\Program Files\Microsoft Visual Studio\2022\<Edition>` directory |
+| Visual Studio | Visual Studio 2022 Community, Professional, or Enterprise, installed in its default `C:\Program Files\Microsoft Visual Studio\2022\<Edition>` directory; Community is preferred when multiple supported editions are installed |
 | Visual Studio workload | **Desktop development with C++**, including MSVC v143 x64/x86 build tools and MSBuild |
 | Windows SDK | **10.0.26100.0** for Brotli, zlib, zstd, OpenSSL, SQLCipher, and the application |
 | Git | Available as `git.exe` in `PATH` |
@@ -75,8 +75,8 @@ The main application currently consumes these pinned dependencies:
 No. Run the commands in this section from a normal `cmd.exe` window or a
 normal PowerShell window. `third_party\build-all.ps1` delegates to the five
 dependency `build.cmd` scripts, and each script locates Visual Studio 2022 in
-one of the supported default Enterprise, Professional, or Community install
-directories and initialises the MSVC x64 environment with Windows SDK
+one of the supported default Community, Professional, or Enterprise install
+directories, in that priority order, and initialises the MSVC x64 environment with Windows SDK
 10.0.26100.0 itself. Do not call `VsDevCmd.bat` or `vcvars64.bat` manually.
 
 The later CMake Preset application and package workflows can also run from a
