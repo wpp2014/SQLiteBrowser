@@ -320,6 +320,13 @@ jobs:
             throw 'Portable SFX build and verification failed.'
           }
 
+      - name: Build and verify MSI
+        run: |
+          cmake --workflow --preset msi-release
+          if ($LASTEXITCODE -ne 0) {
+            throw 'MSI build and verification failed.'
+          }
+
       - if: always()
         name: Upload portable SFX artifacts
         uses: actions/upload-artifact@v7
@@ -331,6 +338,18 @@ jobs:
             output/**/package/artifacts/*-portable.exe
             output/**/package/artifacts/*-portable.exe.sha256
             output/**/package/metadata/portable-sfx-manifest.txt
+
+      - if: always()
+        name: Upload MSI artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-v4-release-msi-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            output/**/package/artifacts/*.msi
+            output/**/package/artifacts/*.msi.sha256
+            output/**/package/metadata/msi-manifest.txt
 
       - if: always()
         name: Write job summary
