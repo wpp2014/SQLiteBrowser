@@ -17,7 +17,7 @@ on:
 run-name: >-
   ${{
     (github.event_name == 'schedule' || inputs.NIGHTLY == true)
-      && 'Build and Deploy Nightly Builds'
+      && 'Build Nightly CI'
       || github.event.pull_request.title
       || github.event.head_commit.message
       || format('{0} on {1}', github.workflow, github.ref_name)
@@ -49,29 +49,6 @@ jobs:
             echo "skippable=false" >> $GITHUB_OUTPUT
           fi
 
-  build-macos:
-    needs: check-skippable
-    if: needs.check-skippable.outputs.skip != 'true'
-    permissions:
-      actions: read
-      contents: write
-    uses: ./.github/workflows/cppcmake-macos.yml
-    secrets: inherit
-    with:
-      NIGHTLY: ${{ github.event_name == 'schedule' || inputs.NIGHTLY == true }}
-      CONSOLIDATE_DEPENDENCY_SUMMARY: true
-
-  build-ubuntu:
-    needs: check-skippable
-    if: needs.check-skippable.outputs.skip != 'true'
-    permissions:
-      actions: read
-      contents: write
-    uses: ./.github/workflows/cppcmake-ubuntu.yml
-    with:
-      NIGHTLY: ${{ github.event_name == 'schedule' || inputs.NIGHTLY == true }}
-      CONSOLIDATE_DEPENDENCY_SUMMARY: true
-
   build-windows:
     needs: check-skippable
     if: needs.check-skippable.outputs.skip != 'true'
@@ -84,27 +61,8 @@ jobs:
       NIGHTLY: ${{ github.event_name == 'schedule' || inputs.NIGHTLY == true }}
       CONSOLIDATE_DEPENDENCY_SUMMARY: true
 
-  build-windows_on_arm:
-    needs: check-skippable
-    if: needs.check-skippable.outputs.skip != 'true'
-    permissions:
-      actions: read
-      contents: write
-    uses: ./.github/workflows/cppcmake-windows_on_arm.yml
-    secrets: inherit
-    with:
-      NIGHTLY: ${{ github.event_name == 'schedule' || inputs.NIGHTLY == true }}
-      CONSOLIDATE_DEPENDENCY_SUMMARY: true
-
   summarize-dependencies:
-    needs:
-      [
-        check-skippable,
-        build-macos,
-        build-ubuntu,
-        build-windows,
-        build-windows_on_arm,
-      ]
+    needs: [check-skippable, build-windows]
     if: always() && needs.check-skippable.outputs.skip != 'true' && !cancelled()
     name: Summarize Dependencies
     runs-on: ubuntu-24.04
@@ -138,8 +96,10 @@ jobs:
           fi
 
   release:
-    if: github.event_name != 'pull_request'
-    needs: [build-macos, build-ubuntu, build-windows, build-windows_on_arm]
+    # Temporarily paused for v4.0.0 phase-2 CI convergence:
+    # keep this job disabled until the dedicated stable packaging/release flow is ready.
+    if: false
+    needs: [build-windows]
     name: Release
     permissions:
       actions: read

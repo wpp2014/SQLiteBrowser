@@ -32,7 +32,7 @@
 | 项目 | 当前契约 |
 | --- | --- |
 | 平台 | Windows x64 only |
-| Visual Studio | 2022 Enterprise、Professional 或 Community，默认安装目录 |
+| Visual Studio | 2022 Community、Professional 或 Enterprise，默认安装目录；多版本并存时优先 Community |
 | 工具集 | MSVC v143，x64 host/target |
 | Windows SDK | `10.0.26100.0`，依赖和主程序必须一致 |
 | CMake/CTest | 已验证 `3.30.3` |
@@ -44,10 +44,12 @@
 依赖脚本只探测以下 Visual Studio 默认目录，不支持自定义安装位置：
 
 ```text
-C:\Program Files\Microsoft Visual Studio\2022\Enterprise
-C:\Program Files\Microsoft Visual Studio\2022\Professional
 C:\Program Files\Microsoft Visual Studio\2022\Community
+C:\Program Files\Microsoft Visual Studio\2022\Professional
+C:\Program Files\Microsoft Visual Studio\2022\Enterprise
 ```
+
+依赖脚本按以上顺序探测；如果首选版本不存在，会依次回退到后续受支持版本。
 
 Debug 固定使用 `/MDd`，Release 固定使用 `/MD`。Debug 运行时只用于安装了匹配开发工具链的机器，不是正式可分发版本。
 

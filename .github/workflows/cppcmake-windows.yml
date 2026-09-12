@@ -1,4 +1,4 @@
-name: Build (Windows)
+name: Build (Windows v4)
 
 on:
   workflow_call:
@@ -11,256 +11,318 @@ on:
         type: boolean
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-v4-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: powershell
+
 jobs:
   build:
-    name: ${{ matrix.os }}-${{ matrix.arch }}
-    runs-on: ${{ matrix.os }}
-    permissions:
-      actions: read
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86, x64]
-        os: [windows-2022]
+    name: windows-2022-x64-release
+    runs-on: windows-2022
+    timeout-minutes: 240
     env:
-      GH_TOKEN: ${{ github.token }}
-      OPENSSL_VERSION: 1.1.1.2100
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      BUILD_CONFIGURATION: Release
+      QT_VERSION: 6.11.1
+      QT_ARCH: win64_msvc2022_64
+      WINDOWS_SDK_VERSION: 10.0.26100.0
+      NASM_VERSION: 2.16.3
 
-      - name: Install dependencies
+    steps:
+      - name: Checkout repository and pinned dependencies
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Validate checkout
         run: |
-          choco install --no-progress ninja
-          if ("${{ matrix.arch }}" -eq "x86") {
-            choco install --no-progress openssl --x86 --version=${{ env.OPENSSL_VERSION}}
-          } else {
-            choco install --no-progress openssl --version=${{ env.OPENSSL_VERSION}}
+          $ErrorActionPreference = 'Stop'
+
+          if ($env:GITHUB_WORKSPACE -match '\s') {
+            throw "SQLCipher requires a checkout path without spaces: $env:GITHUB_WORKSPACE"
           }
 
-          # When building SQLCipher, if we specify a path to OpenSSL and
-          # there are spaces in the path, an error will occur, so to
-          # avoid this, create the symlink.
-          New-Item -Path C:\dev -ItemType Directory
-          if ("${{ matrix.arch }}" -eq "x86") {
-            New-Item -Path "C:\dev\OpenSSL" -ItemType SymbolicLink -Value "C:\Program Files (x86)\OpenSSL-Win32\"
-          } else {
-            New-Item -Path "C:\dev\OpenSSL" -ItemType SymbolicLink -Value "C:\Program Files\OpenSSL"
+          $submoduleStatus = @(git submodule status --recursive)
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to inspect the recursive submodule checkout.'
+          }
+
+          $uninitialised = $submoduleStatus |
+            Where-Object { $_ -match '^[-+U]' }
+          if ($uninitialised) {
+            throw "One or more pinned submodules are not checked out correctly:`n$($uninitialised -join "`n")"
+          }
+
+          $submoduleStatus | Write-Host
+
+      - name: Fetch and validate pinned dependency tags
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $dependencies = @(
+            @{ Path = 'third_party/zlib/src'; Tag = 'v1.3.2' }
+            @{ Path = 'third_party/zstd/src'; Tag = 'v1.5.7' }
+            @{ Path = 'third_party/brotli/src'; Tag = 'v1.2.0' }
+            @{ Path = 'third_party/sqlcipher/src'; Tag = 'v4.18.0' }
+            @{ Path = 'third_party/openssl/src'; Tag = 'openssl-3.5.7' }
+          )
+
+          foreach ($dependency in $dependencies) {
+            $tagRef = "refs/tags/$($dependency.Tag)"
+
+            git -C $dependency.Path fetch `
+              --force `
+              --depth=1 `
+              origin `
+              "${tagRef}:${tagRef}"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to fetch $($dependency.Tag) for $($dependency.Path)."
+            }
+
+            $actualTag = git -C $dependency.Path describe --tags --exact-match
+            if ($LASTEXITCODE -ne 0 -or $actualTag -ne $dependency.Tag) {
+              throw "Unexpected tag for $($dependency.Path): $actualTag"
+            }
+
+            Write-Host "$($dependency.Path): $actualTag"
+          }
+
+      - name: Install NASM
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          choco install nasm `
+            --version=$env:NASM_VERSION `
+            --yes `
+            --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            throw "Chocolatey failed to install NASM $env:NASM_VERSION."
+          }
+
+          $nasmExe = Join-Path $env:ProgramFiles 'NASM\nasm.exe'
+          if (-not (Test-Path -LiteralPath $nasmExe -PathType Leaf)) {
+            throw "Chocolatey reported success, but nasm.exe was not found: $nasmExe"
+          }
+
+          $nasmDir = Split-Path -Parent $nasmExe
+          $nasmDir | Out-File `
+            -FilePath $env:GITHUB_PATH `
+            -Encoding utf8 `
+            -Append
+          $env:Path = "$nasmDir;$env:Path"
+
+          & $nasmExe -v
+          if ($LASTEXITCODE -ne 0) {
+            throw 'NASM verification failed.'
           }
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          arch: ${{ matrix.arch == 'x86' && 'win32_msvc2019' || matrix.arch == 'x64' && 'win64_msvc2019_64'}}
+          version: '6.11.1'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qt5compat qtimageformats qtpdf qtwebengine
           cache: true
-          cache-key-prefix: "cache"
-          version: 5.15.2
+          cache-key-prefix: sqlitebrowser-qt-6.11.1-msvc2022-x64-aqt-dev
+          aqtsource: git+https://github.com/miurahr/aqtinstall.git@9e49c82edc6d946db376dec907cca5b4b486eec5
 
-      - name: Install VS2019
-        run: choco install visualstudio2019community --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows10SDK.19041 --add Microsoft.VisualStudio.Component.VC.Redist.MSM"
-
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.arch == 'x86' && 'amd64_x86' || matrix.arch == 'x64' && 'amd64'}}
-          vsversion: 2019
-
-      - name: Build SQLite
+      - name: Validate Qt runtime inputs
         run: |
-          Set-Location "${{ github.workspace }}\tools\windows"
-          $SQLiteArchiveFileName = (python download_latest_sqlite.py).Trim()
-          Expand-Archive -Path $SQLiteArchiveFileName -DestinationPath C:\dev\
-          Move-Item -Path C:\dev\sqlite-amalgamation-* C:\dev\SQLite\
-          cd C:\dev\SQLite
-          cl sqlite3.c -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_FTS3 -DSQLITE_ENABLE_FTS3_PARENTHESIS -DSQLITE_ENABLE_STAT4 -DSQLITE_SOUNDEX -DSQLITE_ENABLE_JSON1 -DSQLITE_ENABLE_GEOPOLY -DSQLITE_ENABLE_RTREE -DSQLITE_ENABLE_MATH_FUNCTIONS -DSQLITE_MAX_ATTACHED=125 -DSQLITE_API="__declspec(dllexport)" -link -dll -out:sqlite3.dll
+          $ErrorActionPreference = 'Stop'
 
-      - name: Download SQLean extension
-        run: |
-          if ("${{ matrix.arch }}" -eq "x86") {
-            # sqlean has discontinued x86 support starting from v0.28.0
-            gh release download 0.27.4 --pattern "sqlean-win-x86.zip" --repo "nalgeon/sqlean"
-            Expand-Archive -Path sqlean-win-x86.zip -DestinationPath .\sqlean
-          } else {
-            gh release download --pattern "sqlean-win-x64.zip" --repo "nalgeon/sqlean"
-            Expand-Archive -Path sqlean-win-x64.zip -DestinationPath .\sqlean
+          if ([string]::IsNullOrWhiteSpace($env:QT_ROOT_DIR)) {
+            throw 'install-qt-action did not provide QT_ROOT_DIR.'
           }
 
-      - name: Build 'formats' Extensions
-        run: |
-          cp .\src\extensions\extension-formats.c C:\dev\SQLite\
-          cp .\src\extensions\extension-formats.def C:\dev\SQLite\
-          cd C:\dev\SQLite
-          cl /MD extension-formats.c -link -dll -def:extension-formats.def -out:formats.dll
+          $requiredQtFiles = @(
+            'bin\Qt6Pdf.dll',
+            'plugins\imageformats\qicns.dll',
+            'plugins\imageformats\qpdf.dll',
+            'plugins\imageformats\qtga.dll',
+            'plugins\imageformats\qtiff.dll',
+            'plugins\imageformats\qwbmp.dll',
+            'plugins\imageformats\qwebp.dll'
+          )
 
-      - name: Build SQLCipher
-        run: |
-          cd C:\dev
-          Invoke-WebRequest -Uri https://github.com/sqlcipher/sqlcipher/archive/refs/tags/v4.6.1.zip -OutFile 'sqlcipher.zip'
-          Expand-Archive -Path sqlcipher.zip -DestinationPath C:\dev\
-          Move-Item -Path C:\dev\sqlcipher-4.6.1 C:\dev\SQLCipher\
-          cd SQLCipher
-          nmake /f Makefile.msc sqlcipher.dll USE_AMALGAMATION=1 NO_TCL=1 SQLITE3DLL=sqlcipher.dll SQLITE3LIB=sqlcipher.lib SQLITE3EXE=sqlcipher.exe LTLINKOPTS="C:\dev\OpenSSL\lib\libcrypto.lib" OPT_FEATURE_FLAGS="-DSQLITE_TEMP_STORE=2 -DSQLITE_HAS_CODEC=1 -DSQLITE_ENABLE_FTS3=1 -DSQLITE_ENABLE_FTS5=1 -DSQLITE_ENABLE_FTS3_PARENTHESIS=1 -DSQLITE_ENABLE_STAT4=1 -DSQLITE_SOUNDEX=1 -DSQLITE_ENABLE_JSON1=1 -DSQLITE_ENABLE_GEOPOLY=1 -DSQLITE_ENABLE_RTREE=1 -DSQLCIPHER_CRYPTO_OPENSSL=1 -DSQLITE_MAX_ATTACHED=125 -IC:\dev\OpenSSL\include"
-          mkdir sqlcipher
-          copy sqlite3.h sqlcipher
+          $missingQtFiles = @(
+            foreach ($relativePath in $requiredQtFiles) {
+              $fullPath = Join-Path $env:QT_ROOT_DIR $relativePath
+              if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+                $relativePath
+              }
+            }
+          )
 
-      - name: Configure build (SQLite)
-        run: |
-          mkdir release-sqlite && cd release-sqlite
-          cmake -G "Ninja Multi-Config" -DCMAKE_PREFIX_PATH="C:\dev\SQLite" -DENABLE_TESTING=ON ..\
-
-      - name: Build (SQLite)
-        run: |
-          cd release-sqlite
-          cmake --build . --config Release
-
-      - name: Tests (SQLite)
-        run: |
-          cd release-sqlite
-          ctest -C Release --output-on-failure
-
-      - name: Configure build (SQLCipher)
-        run: |
-          mkdir release-sqlcipher && cd release-sqlcipher
-          cmake -G "Ninja Multi-Config" -Dsqlcipher=1 -DCMAKE_PREFIX_PATH="C:\dev\OpenSSL;C:\dev\SQLCipher" -DENABLE_TESTING=ON ..\
-
-      - name: Build (SQLCipher)
-        run: |
-          cd release-sqlcipher
-          cmake --build . --config Release
-
-      - name: Tests (SQLCipher)
-        run: |
-          cd release-sqlcipher
-          ctest -C Release --output-on-failure
-
-      - if: github.event_name != 'pull_request'
-        name: Create MSI
-        env:
-          ExePath: ${{ github.workspace }}
-          OpenSSLPath: C:\dev\OpenSSL
-          SQLCipherPath: C:\dev\SQLCipher
-          SqleanPath: ${{ github.workspace }}\sqlean
-          SQLitePath: C:\dev\SQLite
-        run: |
-          cd installer/windows
-          ./build.cmd ${{ matrix.arch }}
-          $DATE=$(Get-Date -Format "yyyyMMdd")
-          if ("${{ inputs.NIGHTLY }}" -eq "true") {
-            mv DB.Browser.for.SQLite-*.msi "DB.Browser.for.SQLite-$DATE-win-${{ matrix.arch }}.msi"
-          } else {
-            mv DB.Browser.for.SQLite-*.msi "DB.Browser.for.SQLite-dev-$(git rev-parse --short HEAD)-win-${{ matrix.arch }}.msi"
+          if ($missingQtFiles.Count -ne 0) {
+            throw "Qt 6.11.1 runtime inputs are missing:`n  $($missingQtFiles -join "`n  ")"
           }
 
-      - if: github.event_name != 'pull_request'
-        name: Upload artifacts for code signing with SignPath
-        id: unsigned-artifacts
+          Write-Host "Validated $($requiredQtFiles.Count) Qt runtime inputs."
+
+      - name: Create local CMake Presets
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $templatePath = Join-Path $env:GITHUB_WORKSPACE 'CMakePresets.template.json'
+          $presetPath = Join-Path $env:GITHUB_WORKSPACE 'CMakePresets.json'
+          $placeholder = 'REPLACE_WITH_QT_6_11_1_MSVC2022_X64_ROOT'
+
+          if (-not (Test-Path -LiteralPath $templatePath -PathType Leaf)) {
+            throw "CMake Preset template is missing: $templatePath"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:QT_ROOT_DIR)) {
+            throw 'install-qt-action did not provide QT_ROOT_DIR.'
+          }
+
+          $qtRoot = [IO.Path]::GetFullPath($env:QT_ROOT_DIR)
+          $qmake = Join-Path $qtRoot 'bin\qmake.exe'
+          if (-not (Test-Path -LiteralPath $qmake -PathType Leaf)) {
+            throw "Qt 6.11.1 qmake.exe is missing: $qmake"
+          }
+
+          $template = [IO.File]::ReadAllText($templatePath)
+          $placeholderCount = [regex]::Matches(
+            $template,
+            [regex]::Escape($placeholder)
+          ).Count
+          if ($placeholderCount -ne 1) {
+            throw "Expected exactly one Qt placeholder in the CMake Preset template; found $placeholderCount."
+          }
+
+          $preset = $template.Replace($placeholder, $qtRoot.Replace('\', '/'))
+          $utf8NoBom = New-Object Text.UTF8Encoding($false)
+          [IO.File]::WriteAllText($presetPath, $preset, $utf8NoBom)
+
+          if ([IO.File]::ReadAllText($presetPath).Contains($placeholder)) {
+            throw 'The generated CMakePresets.json still contains the Qt placeholder.'
+          }
+
+          & $qmake --version
+          if ($LASTEXITCODE -ne 0) {
+            throw 'qmake --version failed.'
+          }
+
+          cmake --list-presets=all
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The generated CMakePresets.json is invalid.'
+          }
+
+      - name: Record build environment
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          Write-Host "Runner image: $env:ImageOS $env:ImageVersion"
+          Write-Host "Required Windows SDK: $env:WINDOWS_SDK_VERSION"
+          git --version
+          cmake --version
+          perl -e 'print qq(Perl: $^V\n)'
+          nasm -v
+
+          $vsRoots = @(
+            'C:\Program Files\Microsoft Visual Studio\2022\Community',
+            'C:\Program Files\Microsoft Visual Studio\2022\Professional',
+            'C:\Program Files\Microsoft Visual Studio\2022\Enterprise'
+          )
+          $vsRoot = $vsRoots |
+            Where-Object {
+              Test-Path -LiteralPath (Join-Path $_ 'Common7\Tools\VsDevCmd.bat')
+            } |
+            Select-Object -First 1
+          if (-not $vsRoot) {
+            throw 'No supported default Visual Studio 2022 installation was found.'
+          }
+          Write-Host "Visual Studio: $vsRoot"
+
+      - name: Build and stage dependencies
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass `
+            -File third_party\build-all.ps1 `
+            -Action Build `
+            -Configuration $env:BUILD_CONFIGURATION
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Dependency build failed.'
+          }
+
+      - name: Test dependencies
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass `
+            -File third_party\build-all.ps1 `
+            -Action Test `
+            -Configuration $env:BUILD_CONFIGURATION `
+            -OpenSSLTestMode Safe
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Dependency tests failed.'
+          }
+
+      - name: Publish and verify dependency aggregate
+        run: |
+          third_party\aggregate.cmd build release
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Dependency aggregate publication failed.'
+          }
+
+          third_party\aggregate.cmd check release
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Dependency aggregate verification failed.'
+          }
+
+      - name: Build and run application unit tests
+        run: |
+          cmake --workflow --preset test-release
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Application unit tests failed.'
+          }
+
+      - name: Build and run restricted-PATH runtime smoke tests
+        run: |
+          cmake --workflow --preset smoke-release
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Runtime smoke tests failed.'
+          }
+
+      - if: always()
+        name: Write job summary
+        run: |
+          "## Windows v4 Release x64" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "- Runner: ``$env:ImageOS $env:ImageVersion``" >> $env:GITHUB_STEP_SUMMARY
+          "- Qt: ``$env:QT_VERSION $env:QT_ARCH``" >> $env:GITHUB_STEP_SUMMARY
+          "- Windows SDK: ``$env:WINDOWS_SDK_VERSION``" >> $env:GITHUB_STEP_SUMMARY
+          "- OpenSSL tests: ``Safe``" >> $env:GITHUB_STEP_SUMMARY
+          "- Configuration: ``$env:BUILD_CONFIGURATION x64``" >> $env:GITHUB_STEP_SUMMARY
+
+          $manifests = Get-ChildItem -LiteralPath output `
+            -Filter build-manifest.txt `
+            -Recurse `
+            -File `
+            -ErrorAction SilentlyContinue
+          if ($manifests) {
+            "" >> $env:GITHUB_STEP_SUMMARY
+            "### Dependency manifests" >> $env:GITHUB_STEP_SUMMARY
+            foreach ($manifest in $manifests) {
+              $relative = Resolve-Path -LiteralPath $manifest.FullName -Relative
+              $relative = ($relative -replace '^\.\\', '') -replace '\\', '/'
+              "- ``$relative``" >> $env:GITHUB_STEP_SUMMARY
+            }
+          }
+
+      - if: always()
+        name: Upload build manifests and test diagnostics
         uses: actions/upload-artifact@v7
         with:
-          name: build-artifacts-${{ matrix.os }}-win-${{ matrix.arch }}-unsigned
-          path: installer\windows\DB.Browser.for.SQLite-*.msi
-          retention-days: 1
-
-      # Change the signing-policy-slug when you release an RC, RTM or stable release.
-      - if: github.event_name != 'pull_request'
-        name: Code signing with SignPath
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: "${{ secrets.SIGNPATH_API_TOKEN }}"
-          github-artifact-id: "${{ steps.unsigned-artifacts.outputs.artifact-id }}"
-          organization-id: "${{ secrets.SIGNPATH_ORGANIZATION_ID }}"
-          output-artifact-directory: .\installer\windows
-          project-slug: "sqlitebrowser"
-          signing-policy-slug: "test-signing"
-          wait-for-completion: true
-
-      - if: github.event_name != 'pull_request'
-        name: Create ZIP
-        run: |
-          $DATE=$(Get-Date -Format "yyyyMMdd")
-          if ("${{ inputs.NIGHTLY }}" -eq "true") {
-            $FILENAME_FORMAT="DB.Browser.for.SQLite-$DATE-win-${{ matrix.arch }}.zip"
-          } else {
-            $FILENAME_FORMAT="DB.Browser.for.SQLite-dev-$(git rev-parse --short HEAD)-win-${{ matrix.arch }}.zip"
-          }
-          Start-Process msiexec.exe -ArgumentList "/a $(dir installer\windows\DB.Browser.for.SQLite-*.msi) /q TARGETDIR=$PWD\target\" -Wait
-          if ("${{ matrix.arch }}" -eq "x86") {
-            move target\System\* "target\DB Browser for SQLite\"
-          } else {
-            move target\System64\* "target\DB Browser for SQLite\"
-          }
-          Compress-Archive -Path "target\DB Browser for SQLite\*" -DestinationPath $FILENAME_FORMAT
-
-      - if: github.event_name != 'pull_request'
-        name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: build-artifacts-win-${{ matrix.arch }}
+          name: windows-v4-release-diagnostics-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 7
           path: |
-            installer\windows\DB.Browser.for.SQLite-*.msi
-            DB.Browser.for.SQLite-*.zip
-          retention-days: 1
-
-      - name: Summary
-        run: |
-          $OPENSSL_VERSION=(C:\dev\OpenSSL\bin\openssl version) -replace "OpenSSL ([\d\.]+[a-z]+) .*", '$1'
-          $QT_VERSION = & "$env:QT_ROOT_DIR\bin\qmake.exe" --version | Select-String "Using Qt version" | ForEach-Object { $_.ToString().Split()[3] }
-          $SQLCIPHER_VERSION=(Get-Item "C:\dev\SQLCipher\sqlcipher.dll").VersionInfo.FileVersion
-          Select-String -Path "C:\dev\SQLite\sqlite3.h" -Pattern '#define SQLITE_VERSION\s+"([\d\.]+)"' | ForEach-Object {
-            ($_ -match '"([\d\.]+)"') | Out-Null
-            $SQLITE_VERSION=$matches[1]
-          }
-
-          New-Item -ItemType Directory -Force -Path dependency-summary | Out-Null
-          $SUMMARY_ROW = "| Build (Windows) | ${{ matrix.os }} / ${{ matrix.arch }} | $OPENSSL_VERSION | $QT_VERSION | $SQLCIPHER_VERSION | $SQLITE_VERSION |"
-          Set-Content -Path "dependency-summary/dependencies-windows-${{ matrix.os }}-${{ matrix.arch }}.md" -Value $SUMMARY_ROW
-
-      - name: Upload dependency summary
-        uses: actions/upload-artifact@v7
-        with:
-          name: dependency-summary-windows-${{ matrix.os }}-${{ matrix.arch }}
-          path: dependency-summary/*.md
-          retention-days: 1
-
-  summarize-dependencies:
-    if: always() && inputs.CONSOLIDATE_DEPENDENCY_SUMMARY != true && !cancelled()
-    needs: build
-    name: Summarize Dependencies
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Download dependency summaries
-        uses: actions/download-artifact@v8
-        continue-on-error: true
-        with:
-          pattern: dependency-summary-*
-          path: dependency-summary
-          merge-multiple: true
-
-      - name: Summary
-        run: |
-          {
-            echo "## Dependencies used"
-            echo ""
-            echo "| Workflow | Target | OpenSSL | Qt | SQLCipher | SQLite |"
-            echo "| :---: | :---: | :---: | :---: | :---: | :---: |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -d dependency-summary ] && find dependency-summary -type f -name '*.md' | grep -q .; then
-            find dependency-summary -type f -name '*.md' -print | sort | while IFS= read -r file; do
-              cat "$file" >> "$GITHUB_STEP_SUMMARY"
-            done
-          else
-            echo "| Not available | No dependency summaries were uploaded. | - | - | - | - |" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-  release:
-    if: github.event_name == 'workflow_dispatch' && github.workflow == 'Build (Windows)'
-    needs: build
-    name: Release
-    permissions:
-      actions: read
-      contents: write
-    uses: ./.github/workflows/release.yml
+            output/**/build-manifest.txt
+            output/**/runtime-manifest.txt
+            output/**/Testing/Temporary/**
+            output/**/CMakeFiles/CMakeConfigureLog.yaml
