@@ -104,7 +104,8 @@ void ExtendedScintilla::dropEvent(QDropEvent* e)
         return;
 
     QFile f(file);
-    f.open(QIODevice::ReadOnly);
+    if(!f.open(QIODevice::ReadOnly))
+        return;
     setText(f.readAll());
     f.close();
 }

@@ -1468,7 +1468,11 @@ void MainWindow::importTableFromCSV()
         // Save clipboard content to temporary file
 
         QTemporaryFile temp(QDir::tempPath() + QDir::separator() + "csv_clipboard");
-        temp.open();
+        if(!temp.open()) {
+            QMessageBox::warning(this, qApp->applicationName(),
+                                 tr("Could not create temporary file for CSV import: %1").arg(temp.errorString()));
+            return;
+        }
         QClipboard* clipboard = QGuiApplication::clipboard();
         temp.write(clipboard->text().toUtf8());
         temp.close();
@@ -1619,7 +1623,13 @@ void MainWindow::importDatabaseFromSQL()
     // Open, read, execute and close file
     QApplication::setOverrideCursor(Qt::WaitCursor);
     QFile f(fileName);
-    f.open(QIODevice::ReadOnly);
+    if(!f.open(QIODevice::ReadOnly))
+    {
+        QApplication::restoreOverrideCursor();
+        db.setPragma("defer_foreign_keys", foreignKeysOldSettings);
+        QMessageBox::warning(this, QApplication::applicationName(), tr("Couldn't read file \"%1\": %2.").arg(fileName, f.errorString()));
+        return;
+    }
     QByteArray filedata = f.readAll();
     removeBom(filedata);
     bool ok = db.executeMultiSQL(filedata, newDbFile.size() == 0);
@@ -2435,7 +2445,11 @@ void MainWindow::reloadSettings()
             QMessageBox::warning(this, qApp->applicationName(),
                                tr("Could not find resource file: %1").arg(f.fileName()));
         } else {
-            f.open(QFile::ReadOnly | QFile::Text);
+            if(!f.open(QFile::ReadOnly | QFile::Text)) {
+                QMessageBox::warning(this, qApp->applicationName(),
+                                   tr("Could not open resource file: %1").arg(f.fileName()));
+                break;
+            }
             QTextStream ts(&f);
             qApp->setStyleSheet(ts.readAll());
         }
@@ -2799,7 +2813,12 @@ MainWindow::LoadAttempResult MainWindow::loadProject(QString filename, bool read
     if(!filename.isEmpty())
     {
         QFile file(filename);
-        file.open(QFile::ReadOnly | QFile::Text);
+        if(!file.open(QFile::ReadOnly | QFile::Text))
+        {
+            QMessageBox::warning(this, QApplication::applicationName(),
+                                 tr("Could not open project file for reading.\nReason: %1").arg(file.errorString()));
+            return Aborted;
+        }
 
         QXmlStreamReader xml(&file);
         xml.readNext();     // token == QXmlStreamReader::StartDocument
@@ -3407,7 +3426,11 @@ void MainWindow::editEncryption()
         if(ok)
         {
             QFile file(temporalFile);
-            file.open(QFile::WriteOnly);
+            if(!file.open(QFile::WriteOnly)) {
+                QMessageBox::warning(this, qApp->applicationName(),
+                                     tr("Could not create temporary encrypted database file.\nReason: %1").arg(file.errorString()));
+                return;
+            }
             file.close();
         }
 

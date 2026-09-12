@@ -250,8 +250,7 @@ void SqlExecutionArea::openFile(const QString& filename)
 {
     // Open file for reading
     QFile f(filename);
-    f.open(QIODevice::ReadOnly);
-    if(!f.isOpen())
+    if(!f.open(QIODevice::ReadOnly))
     {
         QMessageBox::warning(this, qApp->applicationName(), tr("Couldn't read file \"%1\": %2.").arg(filename, f.errorString()));
         return;
@@ -280,8 +279,7 @@ void SqlExecutionArea::saveFile(const QString& filename)
 
     // Open file for writing
     QFile f(filename);
-    f.open(QIODevice::WriteOnly);
-    if(!f.isOpen())
+    if(!f.open(QIODevice::WriteOnly))
     {
         QMessageBox::warning(this, qApp->applicationName(), tr("Couldn't save file: %1.").arg(f.errorString()));
         return;
