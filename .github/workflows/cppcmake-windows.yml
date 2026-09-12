@@ -320,6 +320,35 @@ jobs:
             throw 'Portable SFX build and verification failed.'
           }
 
+      - name: Accept WiX OSMF EULA for CI user
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vsWhere -PathType Leaf)) {
+            throw "vswhere.exe not found: $vsWhere"
+          }
+
+          $msbuild = & $vsWhere `
+            -latest `
+            -products * `
+            -requires Microsoft.Component.MSBuild `
+            -find 'MSBuild\**\Bin\MSBuild.exe' |
+            Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($msbuild)) {
+            throw 'Unable to locate MSBuild.exe via vswhere.'
+          }
+
+          & $msbuild `
+            installer\windows\wix\SQLiteBrowser.Installer.wixproj `
+            -nologo `
+            -restore `
+            -t:AcceptEula `
+            -p:EulaId=wix7
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to accept WiX OSMF EULA for the CI user.'
+          }
+
       - name: Build and verify MSI
         run: |
           cmake --workflow --preset msi-release
