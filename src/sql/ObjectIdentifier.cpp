@@ -45,11 +45,10 @@ std::string escapeIdentifier(const std::string& id)
         // selected.
         return '[' + id + ']';
     case DoubleQuotes:
-        // This may produce a 'control reaches end of non-void function' warning if the
-        // default branch is removed, even though we have covered all possibilities in the
-        // switch statement.
         return '"' + duplicate_char(id, '"') + '"';
     }
+
+    return '"' + duplicate_char(id, '"') + '"';
 }
 
 std::string escapeString(const std::string& literal)

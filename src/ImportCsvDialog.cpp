@@ -397,7 +397,8 @@ CSVParser::ParserResult ImportCsvDialog::parseCSV(const QString &fileName, std::
 {
     // Parse all csv data
     QFile file(fileName);
-    file.open(QIODevice::ReadOnly);
+    if(!file.open(QIODevice::ReadOnly))
+        return CSVParser::ParserResultError;
 
     CSVParser csv(ui->checkBoxTrimFields->isChecked(), toUtf8(currentSeparatorChar()), toUtf8(currentQuoteChar()));
 
