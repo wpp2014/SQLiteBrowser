@@ -122,6 +122,31 @@ jobs:
             throw 'NASM verification failed.'
           }
 
+      - name: Install NSIS
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          choco install nsis `
+            --version=3.12 `
+            --yes `
+            --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Chocolatey failed to install NSIS 3.12.'
+          }
+
+          $nsisExe = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          if (-not (Test-Path -LiteralPath $nsisExe -PathType Leaf)) {
+            throw "NSIS 3.12 was not found at the required default path: $nsisExe"
+          }
+
+          $nsisVersion = (& $nsisExe /VERSION).Trim()
+          if ($LASTEXITCODE -ne 0) {
+            throw 'NSIS version check failed.'
+          }
+          if ($nsisVersion -ne 'v3.12') {
+            throw "NSIS version mismatch. Expected v3.12, got $nsisVersion."
+          }
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
@@ -288,6 +313,73 @@ jobs:
             throw 'Runtime smoke tests failed.'
           }
 
+      - name: Build and verify portable SFX
+        run: |
+          cmake --workflow --preset portable-sfx-release
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Portable SFX build and verification failed.'
+          }
+
+      - name: Accept WiX OSMF EULA for CI user
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vsWhere -PathType Leaf)) {
+            throw "vswhere.exe not found: $vsWhere"
+          }
+
+          $msbuild = & $vsWhere `
+            -latest `
+            -products * `
+            -requires Microsoft.Component.MSBuild `
+            -find 'MSBuild\**\Bin\MSBuild.exe' |
+            Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($msbuild)) {
+            throw 'Unable to locate MSBuild.exe via vswhere.'
+          }
+
+          & $msbuild `
+            installer\windows\wix\SQLiteBrowser.Installer.wixproj `
+            -nologo `
+            -restore `
+            -t:AcceptEula `
+            -p:EulaId=wix7
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to accept WiX OSMF EULA for the CI user.'
+          }
+
+      - name: Build and verify MSI
+        run: |
+          cmake --workflow --preset msi-release
+          if ($LASTEXITCODE -ne 0) {
+            throw 'MSI build and verification failed.'
+          }
+
+      - if: always()
+        name: Upload portable SFX artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-v4-release-portable-sfx-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            output/**/package/artifacts/*-portable.exe
+            output/**/package/artifacts/*-portable.exe.sha256
+            output/**/package/metadata/portable-sfx-manifest.txt
+
+      - if: always()
+        name: Upload MSI artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-v4-release-msi-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            output/**/package/artifacts/*.msi
+            output/**/package/artifacts/*.msi.sha256
+            output/**/package/metadata/msi-manifest.txt
+
       - if: always()
         name: Write job summary
         run: |
@@ -320,7 +412,7 @@ jobs:
         with:
           name: windows-v4-release-diagnostics-${{ github.run_attempt }}
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 3
           path: |
             output/**/build-manifest.txt
             output/**/runtime-manifest.txt
