@@ -456,8 +456,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: |
-            output/**/package/artifacts/*-portable.exe
-            output/**/package/artifacts/*-portable.exe.sha256
+            output/x64-shared-release/package/artifacts/*-portable.exe
+            output/x64-shared-release/package/artifacts/*-portable.exe.sha256
 
       - if: always()
         name: Upload MSI artifacts
@@ -467,8 +467,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: |
-            output/**/package/artifacts/*.msi
-            output/**/package/artifacts/*.msi.sha256
+            output/x64-shared-release/package/artifacts/*.msi
+            output/x64-shared-release/package/artifacts/*.msi.sha256
 
       - if: always()
         name: Write job summary
