@@ -306,6 +306,11 @@ builds, tests, package runtime assembly, portable self-extracting EXE, WiX MSI
 creation, stable Release workflow, and troubleshooting, follow the
 [Windows v4 build guide](docs/windows-v4-build-guide.md).
 
+Normal builds and GitHub packaging build the dependencies, application, and
+release packages without running test suites. Developers invoke dependency
+tests, application unit tests, runtime smoke checks, and portable-package
+verification explicitly as documented in the guide.
+
 The public v4.0.0 binary formats are the portable SFX and WiX MSI. Both require
 the latest compatible Microsoft Visual C++ x64 Runtime. The packages are not
 Authenticode-signed, so Windows can display an unknown-publisher or SmartScreen

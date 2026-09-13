@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.30.3)
 
+if(NOT DEFINED SQLITEBROWSER_SFX_ACTION)
+    set(SQLITEBROWSER_SFX_ACTION BUILD)
+endif()
+string(TOUPPER "${SQLITEBROWSER_SFX_ACTION}" SQLITEBROWSER_SFX_ACTION)
+if(NOT SQLITEBROWSER_SFX_ACTION MATCHES "^(BUILD|VERIFY)$")
+    message(FATAL_ERROR
+        "Unsupported portable SFX action: ${SQLITEBROWSER_SFX_ACTION}")
+endif()
+
 foreach(_required_variable IN ITEMS
         SQLITEBROWSER_SFX_SOURCE_DIR
         SQLITEBROWSER_SFX_CONFIGURATION_ROOT
@@ -7,8 +16,6 @@ foreach(_required_variable IN ITEMS
         SQLITEBROWSER_SFX_RUNTIME_MANIFEST
         SQLITEBROWSER_SFX_VERSION
         SQLITEBROWSER_SFX_APP_NAME
-        SQLITEBROWSER_SFX_SMOKE_EXECUTABLE
-        SQLITEBROWSER_SFX_TLS_URL
         SQLITEBROWSER_SFX_NSIS_SCRIPT
         SQLITEBROWSER_SFX_ARTIFACT_DIR
         SQLITEBROWSER_SFX_WORK_DIR
@@ -18,6 +25,18 @@ foreach(_required_variable IN ITEMS
         message(FATAL_ERROR "Missing required SFX variable: ${_required_variable}")
     endif()
 endforeach()
+
+if(SQLITEBROWSER_SFX_ACTION STREQUAL "VERIFY")
+    foreach(_required_variable IN ITEMS
+            SQLITEBROWSER_SFX_SMOKE_EXECUTABLE
+            SQLITEBROWSER_SFX_TLS_URL)
+        if(NOT DEFINED ${_required_variable}
+                OR "${${_required_variable}}" STREQUAL "")
+            message(FATAL_ERROR
+                "Missing required SFX verification variable: ${_required_variable}")
+        endif()
+    endforeach()
+endif()
 
 if(NOT SQLITEBROWSER_SFX_VERSION MATCHES "^[0-9]+\.[0-9]+\.[0-9]+$")
     message(FATAL_ERROR
@@ -30,7 +49,6 @@ foreach(_path_variable IN ITEMS
         SQLITEBROWSER_SFX_CONFIGURATION_ROOT
         SQLITEBROWSER_SFX_RUNTIME_DIR
         SQLITEBROWSER_SFX_RUNTIME_MANIFEST
-        SQLITEBROWSER_SFX_SMOKE_EXECUTABLE
         SQLITEBROWSER_SFX_NSIS_SCRIPT
         SQLITEBROWSER_SFX_ARTIFACT_DIR
         SQLITEBROWSER_SFX_WORK_DIR
@@ -39,6 +57,11 @@ foreach(_path_variable IN ITEMS
         OUTPUT_VARIABLE _normalized_path)
     set(${_path_variable} "${_normalized_path}")
 endforeach()
+
+if(SQLITEBROWSER_SFX_ACTION STREQUAL "VERIFY")
+    cmake_path(ABSOLUTE_PATH SQLITEBROWSER_SFX_SMOKE_EXECUTABLE NORMALIZE
+        OUTPUT_VARIABLE SQLITEBROWSER_SFX_SMOKE_EXECUTABLE)
+endif()
 
 set(_expected_runtime_dir
     "${SQLITEBROWSER_SFX_CONFIGURATION_ROOT}/package/runtime")
@@ -89,13 +112,18 @@ endif()
 
 foreach(_required_file IN ITEMS
         "${SQLITEBROWSER_SFX_RUNTIME_MANIFEST}"
-        "${SQLITEBROWSER_SFX_SMOKE_EXECUTABLE}"
         "${SQLITEBROWSER_SFX_NSIS_SCRIPT}"
         "${SQLITEBROWSER_SFX_SOURCE_DIR}/src/iconwin.ico")
     if(NOT EXISTS "${_required_file}")
         message(FATAL_ERROR "Required SFX input is missing: ${_required_file}")
     endif()
 endforeach()
+if(SQLITEBROWSER_SFX_ACTION STREQUAL "VERIFY"
+        AND NOT EXISTS "${SQLITEBROWSER_SFX_SMOKE_EXECUTABLE}")
+    message(FATAL_ERROR
+        "Required SFX smoke executable is missing: "
+        "${SQLITEBROWSER_SFX_SMOKE_EXECUTABLE}")
+endif()
 if(NOT IS_DIRECTORY "${SQLITEBROWSER_SFX_RUNTIME_DIR}")
     message(FATAL_ERROR
         "Release package runtime is missing: ${SQLITEBROWSER_SFX_RUNTIME_DIR}")
@@ -238,44 +266,6 @@ set(_positive_root "${SQLITEBROWSER_SFX_VERIFY_DIR}/SQLite Browser 验证")
 set(_negative_root "${SQLITEBROWSER_SFX_VERIFY_DIR}/non-empty-target")
 set(_negative_sentinel "${_negative_root}/do-not-overwrite.txt")
 
-file(REMOVE_RECURSE
-    "${SQLITEBROWSER_SFX_WORK_DIR}"
-    "${SQLITEBROWSER_SFX_VERIFY_DIR}")
-file(MAKE_DIRECTORY
-    "${SQLITEBROWSER_SFX_WORK_DIR}"
-    "${SQLITEBROWSER_SFX_ARTIFACT_DIR}"
-    "${SQLITEBROWSER_SFX_VERIFY_DIR}")
-
-cmake_path(NATIVE_PATH SQLITEBROWSER_SFX_RUNTIME_DIR NORMALIZE
-    _runtime_native)
-cmake_path(NATIVE_PATH _temporary_sfx NORMALIZE _temporary_sfx_native)
-set(_icon_file "${SQLITEBROWSER_SFX_SOURCE_DIR}/src/iconwin.ico")
-cmake_path(NATIVE_PATH _icon_file NORMALIZE _icon_native)
-cmake_path(NATIVE_PATH SQLITEBROWSER_SFX_NSIS_SCRIPT NORMALIZE
-    _nsis_script_native)
-
-execute_process(
-    COMMAND "${_makensis}" /V4
-        "/DPRODUCT_VERSION=${SQLITEBROWSER_SFX_VERSION}"
-        "/DPAYLOAD_DIR=${_runtime_native}"
-        "/DOUTPUT_FILE=${_temporary_sfx_native}"
-        "/DICON_FILE=${_icon_native}"
-        "${_nsis_script_native}"
-    RESULT_VARIABLE _makensis_result
-    COMMAND_ECHO STDOUT
-    ECHO_OUTPUT_VARIABLE
-    ECHO_ERROR_VARIABLE)
-if(NOT _makensis_result EQUAL 0 OR NOT EXISTS "${_temporary_sfx}")
-    message(FATAL_ERROR
-        "NSIS portable SFX build failed with exit code ${_makensis_result}.")
-endif()
-
-file(REMOVE "${_sfx_path}" "${_sfx_checksum_path}")
-file(RENAME "${_temporary_sfx}" "${_sfx_path}" RESULT _publish_result)
-if(NOT _publish_result STREQUAL "0")
-    message(FATAL_ERROR "Failed to publish portable SFX: ${_publish_result}")
-endif()
-
 function(_sqlitebrowser_run_sfx_silent sfx_path target_dir runner_name result_var)
     cmake_path(NATIVE_PATH sfx_path NORMALIZE _sfx_native)
     cmake_path(NATIVE_PATH target_dir NORMALIZE _target_native)
@@ -293,78 +283,137 @@ function(_sqlitebrowser_run_sfx_silent sfx_path target_dir runner_name result_va
     set(${result_var} "${_runner_result}" PARENT_SCOPE)
 endfunction()
 
-_sqlitebrowser_run_sfx_silent(
-    "${_sfx_path}" "${_positive_root}" run-positive _extract_result)
-if(NOT _extract_result EQUAL 0)
-    message(FATAL_ERROR
-        "Portable SFX silent extraction failed with exit code ${_extract_result}.")
-endif()
+set(_silent_extraction_status "not run")
+set(_runtime_smoke_status "not run")
+set(_non_empty_status "not run")
 
-_sqlitebrowser_validate_runtime(
-    "${_positive_root}" Release PACKAGE "${SQLITEBROWSER_SFX_APP_NAME}")
-_sqlitebrowser_sfx_validate_manifest(
-    "${_positive_root}" "${SQLITEBROWSER_SFX_RUNTIME_MANIFEST}"
-    _extracted_manifest_paths)
+if(SQLITEBROWSER_SFX_ACTION STREQUAL "BUILD")
+    file(REMOVE_RECURSE
+        "${SQLITEBROWSER_SFX_WORK_DIR}"
+        "${SQLITEBROWSER_SFX_VERIFY_DIR}")
+    file(MAKE_DIRECTORY
+        "${SQLITEBROWSER_SFX_WORK_DIR}"
+        "${SQLITEBROWSER_SFX_ARTIFACT_DIR}")
 
-set(_extracted_smoke
-    "${_positive_root}/sqlitebrowser-runtime-smoke-tool.exe")
-file(COPY_FILE
-    "${SQLITEBROWSER_SFX_SMOKE_EXECUTABLE}"
-    "${_extracted_smoke}"
-    ONLY_IF_DIFFERENT
-    RESULT _smoke_copy_result)
-if(NOT _smoke_copy_result STREQUAL "0")
-    message(FATAL_ERROR
-        "Failed to place the temporary portable runtime smoke tool: "
-        "${_smoke_copy_result}")
-endif()
+    cmake_path(NATIVE_PATH SQLITEBROWSER_SFX_RUNTIME_DIR NORMALIZE
+        _runtime_native)
+    cmake_path(NATIVE_PATH _temporary_sfx NORMALIZE _temporary_sfx_native)
+    set(_icon_file "${SQLITEBROWSER_SFX_SOURCE_DIR}/src/iconwin.ico")
+    cmake_path(NATIVE_PATH _icon_file NORMALIZE _icon_native)
+    cmake_path(NATIVE_PATH SQLITEBROWSER_SFX_NSIS_SCRIPT NORMALIZE
+        _nsis_script_native)
 
-# Run the helper from the extracted application directory. This mirrors the
-# packaged application's Windows DLL search layout and keeps Qt/OpenSSL loading
-# reliable when the selected directory contains non-ASCII characters.
-execute_process(
-    COMMAND "${CMAKE_COMMAND}"
-        "-DAPP_EXECUTABLE=${_positive_root}/${SQLITEBROWSER_SFX_APP_NAME}"
-        "-DSMOKE_EXECUTABLE=${_extracted_smoke}"
-        "-DRUNTIME_DIR=${_positive_root}"
-        "-DSMOKE_WORK_DIR=${SQLITEBROWSER_SFX_WORK_DIR}/smoke"
-        "-DTLS_URL=${SQLITEBROWSER_SFX_TLS_URL}"
-        -P "${SQLITEBROWSER_SFX_SOURCE_DIR}/cmake/RunSQLiteBrowserWindowsSmoke.cmake"
-    RESULT_VARIABLE _smoke_result
-    COMMAND_ECHO STDOUT)
-file(REMOVE "${_extracted_smoke}")
-if(NOT _smoke_result EQUAL 0)
-    message(FATAL_ERROR
-        "Extracted portable SFX runtime smoke failed with exit code "
-        "${_smoke_result}.")
-endif()
-_sqlitebrowser_sfx_validate_manifest(
-    "${_positive_root}" "${SQLITEBROWSER_SFX_RUNTIME_MANIFEST}"
-    _extracted_manifest_paths_after_smoke)
+    execute_process(
+        COMMAND "${_makensis}" /V4
+            "/DPRODUCT_VERSION=${SQLITEBROWSER_SFX_VERSION}"
+            "/DPAYLOAD_DIR=${_runtime_native}"
+            "/DOUTPUT_FILE=${_temporary_sfx_native}"
+            "/DICON_FILE=${_icon_native}"
+            "${_nsis_script_native}"
+        RESULT_VARIABLE _makensis_result
+        COMMAND_ECHO STDOUT
+        ECHO_OUTPUT_VARIABLE
+        ECHO_ERROR_VARIABLE)
+    if(NOT _makensis_result EQUAL 0 OR NOT EXISTS "${_temporary_sfx}")
+        message(FATAL_ERROR
+            "NSIS portable SFX build failed with exit code ${_makensis_result}.")
+    endif()
 
-file(MAKE_DIRECTORY "${_negative_root}")
-file(WRITE "${_negative_sentinel}" "sentinel-do-not-overwrite\n")
-file(SHA256 "${_negative_sentinel}" _sentinel_hash_before)
-_sqlitebrowser_run_sfx_silent(
-    "${_sfx_path}" "${_negative_root}" run-negative _negative_result)
-if(NOT _negative_result EQUAL 25)
-    message(FATAL_ERROR
-        "Portable SFX non-empty target test returned ${_negative_result}; "
-        "expected stable validation exit code 25.")
-endif()
-file(GLOB_RECURSE _negative_files
-    LIST_DIRECTORIES FALSE
-    RELATIVE "${_negative_root}"
-    "${_negative_root}/*")
-if(NOT _negative_files STREQUAL "do-not-overwrite.txt")
-    message(FATAL_ERROR
-        "Portable SFX changed the non-empty negative-test directory: "
-        "${_negative_files}")
-endif()
-file(SHA256 "${_negative_sentinel}" _sentinel_hash_after)
-if(NOT _sentinel_hash_after STREQUAL _sentinel_hash_before)
-    message(FATAL_ERROR
-        "Portable SFX modified the negative-test sentinel file.")
+    file(REMOVE "${_sfx_path}" "${_sfx_checksum_path}")
+    file(RENAME "${_temporary_sfx}" "${_sfx_path}" RESULT _publish_result)
+    if(NOT _publish_result STREQUAL "0")
+        message(FATAL_ERROR "Failed to publish portable SFX: ${_publish_result}")
+    endif()
+else()
+    if(NOT EXISTS "${_sfx_path}")
+        message(FATAL_ERROR
+            "Portable SFX must be built before verification: ${_sfx_path}")
+    endif()
+
+    file(REMOVE_RECURSE
+        "${SQLITEBROWSER_SFX_WORK_DIR}"
+        "${SQLITEBROWSER_SFX_VERIFY_DIR}")
+    file(MAKE_DIRECTORY
+        "${SQLITEBROWSER_SFX_WORK_DIR}"
+        "${SQLITEBROWSER_SFX_VERIFY_DIR}")
+
+    _sqlitebrowser_run_sfx_silent(
+        "${_sfx_path}" "${_positive_root}" run-positive _extract_result)
+    if(NOT _extract_result EQUAL 0)
+        message(FATAL_ERROR
+            "Portable SFX silent extraction failed with exit code ${_extract_result}.")
+    endif()
+
+    _sqlitebrowser_validate_runtime(
+        "${_positive_root}" Release PACKAGE "${SQLITEBROWSER_SFX_APP_NAME}")
+    _sqlitebrowser_sfx_validate_manifest(
+        "${_positive_root}" "${SQLITEBROWSER_SFX_RUNTIME_MANIFEST}"
+        _extracted_manifest_paths)
+
+    set(_extracted_smoke
+        "${_positive_root}/sqlitebrowser-runtime-smoke-tool.exe")
+    file(COPY_FILE
+        "${SQLITEBROWSER_SFX_SMOKE_EXECUTABLE}"
+        "${_extracted_smoke}"
+        ONLY_IF_DIFFERENT
+        RESULT _smoke_copy_result)
+    if(NOT _smoke_copy_result STREQUAL "0")
+        message(FATAL_ERROR
+            "Failed to place the temporary portable runtime smoke tool: "
+            "${_smoke_copy_result}")
+    endif()
+
+    # Run the helper from the extracted application directory. This mirrors the
+    # packaged application's Windows DLL search layout and keeps Qt/OpenSSL loading
+    # reliable when the selected directory contains non-ASCII characters.
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}"
+            "-DAPP_EXECUTABLE=${_positive_root}/${SQLITEBROWSER_SFX_APP_NAME}"
+            "-DSMOKE_EXECUTABLE=${_extracted_smoke}"
+            "-DRUNTIME_DIR=${_positive_root}"
+            "-DSMOKE_WORK_DIR=${SQLITEBROWSER_SFX_WORK_DIR}/smoke"
+            "-DTLS_URL=${SQLITEBROWSER_SFX_TLS_URL}"
+            -P "${SQLITEBROWSER_SFX_SOURCE_DIR}/cmake/RunSQLiteBrowserWindowsSmoke.cmake"
+        RESULT_VARIABLE _smoke_result
+        COMMAND_ECHO STDOUT)
+    file(REMOVE "${_extracted_smoke}")
+    if(NOT _smoke_result EQUAL 0)
+        message(FATAL_ERROR
+            "Extracted portable SFX runtime smoke failed with exit code "
+            "${_smoke_result}.")
+    endif()
+    _sqlitebrowser_sfx_validate_manifest(
+        "${_positive_root}" "${SQLITEBROWSER_SFX_RUNTIME_MANIFEST}"
+        _extracted_manifest_paths_after_smoke)
+
+    file(MAKE_DIRECTORY "${_negative_root}")
+    file(WRITE "${_negative_sentinel}" "sentinel-do-not-overwrite\n")
+    file(SHA256 "${_negative_sentinel}" _sentinel_hash_before)
+    _sqlitebrowser_run_sfx_silent(
+        "${_sfx_path}" "${_negative_root}" run-negative _negative_result)
+    if(NOT _negative_result EQUAL 25)
+        message(FATAL_ERROR
+            "Portable SFX non-empty target test returned ${_negative_result}; "
+            "expected stable validation exit code 25.")
+    endif()
+    file(GLOB_RECURSE _negative_files
+        LIST_DIRECTORIES FALSE
+        RELATIVE "${_negative_root}"
+        "${_negative_root}/*")
+    if(NOT _negative_files STREQUAL "do-not-overwrite.txt")
+        message(FATAL_ERROR
+            "Portable SFX changed the non-empty negative-test directory: "
+            "${_negative_files}")
+    endif()
+    file(SHA256 "${_negative_sentinel}" _sentinel_hash_after)
+    if(NOT _sentinel_hash_after STREQUAL _sentinel_hash_before)
+        message(FATAL_ERROR
+            "Portable SFX modified the negative-test sentinel file.")
+    endif()
+
+    set(_silent_extraction_status "passed")
+    set(_runtime_smoke_status "passed")
+    set(_non_empty_status "passed (exit code: 25)")
 endif()
 
 file(SHA256 "${_sfx_path}" _sfx_hash)
@@ -393,11 +442,16 @@ string(CONCAT _sfx_manifest
     "SFX: ${_artifact_base}.exe\n"
     "SFX size: ${_sfx_size}\n"
     "SFX SHA-256: ${_sfx_hash}\n"
-    "Silent extraction: passed\n"
-    "Non-empty target rejection: passed (exit code: 25)\n")
+    "Silent extraction: ${_silent_extraction_status}\n"
+    "Runtime smoke: ${_runtime_smoke_status}\n"
+    "Non-empty target rejection: ${_non_empty_status}\n")
 file(WRITE
     "${SQLITEBROWSER_SFX_CONFIGURATION_ROOT}/package/metadata/portable-sfx-manifest.txt"
     "${_sfx_manifest}")
 
-message(STATUS "SQLiteBrowser portable SFX verified: ${_sfx_path}")
+if(SQLITEBROWSER_SFX_ACTION STREQUAL "VERIFY")
+    message(STATUS "SQLiteBrowser portable SFX verified: ${_sfx_path}")
+else()
+    message(STATUS "SQLiteBrowser portable SFX built: ${_sfx_path}")
+endif()
 message(STATUS "SQLiteBrowser portable SFX SHA-256: ${_sfx_hash}")

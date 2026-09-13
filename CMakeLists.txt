@@ -425,30 +425,43 @@ if(SQLITEBROWSER_DEPLOY_RUNTIME)
             TLS_URL "${SQLITEBROWSER_TLS_SMOKE_URL}"
             SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
         )
+    endif()
 
-        include(cmake/SQLiteBrowserPortableSfx.cmake)
-        sqlitebrowser_add_windows_portable_sfx(
-            TARGET ${PROJECT_NAME}
-            RUNTIME_TARGET sqlitebrowser_runtime_smoke
-            RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
-            MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+    set(_sqlitebrowser_portable_sfx_verify_arguments)
+    if(TARGET sqlitebrowser-runtime-smoke-tool)
+        list(APPEND _sqlitebrowser_portable_sfx_verify_arguments
             SMOKE_TARGET sqlitebrowser-runtime-smoke-tool
             TLS_URL "${SQLITEBROWSER_TLS_SMOKE_URL}"
-            NSIS_SCRIPT
-                "${CMAKE_CURRENT_SOURCE_DIR}/installer/windows/nsis/portable-sfx.nsi"
-            SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
         )
+    endif()
+    include(cmake/SQLiteBrowserPortableSfx.cmake)
+    sqlitebrowser_add_windows_portable_sfx(
+        TARGET ${PROJECT_NAME}
+        RUNTIME_TARGET sqlitebrowser_package_runtime
+        RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+        MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+        NSIS_SCRIPT
+            "${CMAKE_CURRENT_SOURCE_DIR}/installer/windows/nsis/portable-sfx.nsi"
+        SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+        ${_sqlitebrowser_portable_sfx_verify_arguments}
+    )
 
-        include(cmake/SQLiteBrowserWix.cmake)
-        sqlitebrowser_add_windows_msi(
-            TARGET ${PROJECT_NAME}
-            RUNTIME_TARGET sqlitebrowser_runtime_smoke
-            RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
-            MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
-            WIX_PROJECT
-                "${CMAKE_CURRENT_SOURCE_DIR}/installer/windows/wix/SQLiteBrowser.Installer.wixproj"
-            SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
-        )
+    include(cmake/SQLiteBrowserWix.cmake)
+    sqlitebrowser_add_windows_msi(
+        TARGET ${PROJECT_NAME}
+        RUNTIME_TARGET sqlitebrowser_package_runtime
+        RUNTIME_DIR "${SQLITEBROWSER_PACKAGE_RUNTIME_DIR}"
+        MANIFEST "${SQLITEBROWSER_PACKAGE_RUNTIME_MANIFEST}"
+        WIX_PROJECT
+            "${CMAKE_CURRENT_SOURCE_DIR}/installer/windows/wix/SQLiteBrowser.Installer.wixproj"
+        SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+
+    if(TARGET sqlitebrowser_portable_sfx AND TARGET sqlitebrowser_msi)
+        add_custom_target(sqlitebrowser_packages
+            DEPENDS sqlitebrowser_portable_sfx sqlitebrowser_msi)
+        set_target_properties(sqlitebrowser_packages PROPERTIES
+            FOLDER "Packaging")
     endif()
 endif()
 

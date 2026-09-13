@@ -3,8 +3,9 @@
 > Applies to `master` and the `v4.0.0` tag. This build supports Windows x64 only.
 
 The following procedure starts with a fresh clone and produces independently
-configured Debug and Release development outputs, test outputs, and strict
-package runtimes. Run all commands from the repository root in a regular
+configured Debug and Release development outputs, optional test outputs, and
+strict package runtimes. Product build, packaging, and testing are separate
+operations. Run all commands from the repository root in a regular
 `cmd.exe` window. The dependency scripts locate and initialise Visual Studio
 themselves, so a Developer Command Prompt is not required.
 
@@ -237,8 +238,9 @@ cmake --list-presets=all
 ~~~
 
 The output must include the `debug` and `release` configure presets, the
-matching product and unit-test build presets, and the `test-*`, `package-*`,
-and `smoke-*` workflow presets.
+matching product and unit-test build presets, the `test-*`, `package-*`, and
+`smoke-*` workflows, and the `packages-release` and
+`portable-sfx-verify-release` packaging workflows.
 
 ## 5. Configure and build the application
 
@@ -287,9 +289,10 @@ No Qt, OpenSSL, or SQLCipher directory needs to be added to the global `PATH`.
 
 ## 6. Run the tests
 
-The normal product preset intentionally does not build the four unit-test
-executables. Use the dedicated workflows to configure, build only the unit-test
-aggregate target, and run CTest:
+Tests are developer-invoked operations. Neither the normal product build nor
+the GitHub Actions packaging job runs them. The normal product preset also does
+not build the four unit-test executables. Use the dedicated workflows to
+configure, build only the unit-test aggregate target, and run CTest:
 
 ~~~cmd
 cmake --workflow --preset test-debug
@@ -328,7 +331,7 @@ the publication allowlist explicitly excludes it from `package\runtime`.
 Debug is intended only for testing on a machine with the matching development
 toolchain.
 
-Run the complete restricted-`PATH` package smoke suites with:
+Run the complete restricted-`PATH` package smoke suites manually with:
 
 ~~~cmd
 cmake --workflow --preset smoke-debug
@@ -367,12 +370,24 @@ The equivalent convenience entry point is:
 installer\windows\nsis\build.cmd
 ~~~
 
-The workflow validates and smoke-tests the Release runtime, builds a Unicode
-NSIS executable with forced CRC checking and solid LZMA compression, silently
-extracts it to a path containing spaces and non-ASCII characters, verifies all
-70 paths and hashes, and reruns the startup, SQLCipher, Brotli, TLS, and HTTPS
-smoke checks from the extracted directory. A negative test also confirms that
-a non-empty destination is rejected without modifying its sentinel file.
+The build workflow assembles and validates the Release runtime, builds a
+Unicode NSIS executable with forced CRC checking and solid LZMA compression,
+and writes its SHA-256 and metadata manifest. It does not extract or run the
+package. The manifest records the extraction, runtime smoke, and non-empty
+destination checks as `not run`.
+
+Run the extracted-package verification explicitly when required:
+
+~~~cmd
+cmake --workflow --preset portable-sfx-verify-release
+~~~
+
+This separate developer command rebuilds the SFX, silently extracts it to a
+path containing spaces and non-ASCII characters, verifies all 70 paths and
+hashes, reruns the startup, SQLCipher, Brotli, TLS, and HTTPS smoke checks from
+the extracted directory, and confirms that a non-empty destination is rejected
+without modifying its sentinel file. A successful run updates the three
+verification fields in `portable-sfx-manifest.txt` to `passed`.
 
 Outputs are written to:
 
@@ -382,6 +397,8 @@ output\x64-shared-release\package\artifacts\
   DB.Browser.for.SQLCipher-4.0.0-win-x64-portable.exe.sha256
 
 output\x64-shared-release\package\metadata\portable-sfx-manifest.txt
+
+# Created only by portable-sfx-verify-release:
 output\x64-shared-release\package\verify\portable-sfx\
 ~~~
 
@@ -430,7 +447,7 @@ made and documented that licensing decision. The repository's GitHub-hosted
 workflow performs the same explicit `AcceptEula` target for its isolated CI
 account after the repository maintainer made that CI decision.
 
-Build, smoke-test, package, and verify the MSI from the repository root:
+Build and validate the MSI from the repository root:
 
 ~~~cmd
 cmake --workflow --preset msi-release
@@ -446,16 +463,25 @@ The workflow:
 
 1. configures and minimally builds the Release x64 application;
 2. assembles the strict 70-file Release package runtime;
-3. runs the restricted-`PATH` startup, SQLCipher, Brotli, TLS, and HTTPS smoke
-   checks;
-4. checks every runtime path and SHA-256 against `runtime-manifest.txt`;
-5. restores the exactly pinned `WixToolset.Sdk` 7.0.0 and restores
+3. checks every runtime path and SHA-256 against `runtime-manifest.txt`;
+4. restores the exactly pinned `WixToolset.Sdk` 7.0.0 and restores
    `WixToolset.UI.wixext` 7.0.0 using `packages.lock.json`;
-6. builds the per-machine x64 MSI with VS2022 MSBuild;
-7. performs an MSI administrative extraction and compares all application
+5. builds the per-machine x64 MSI with VS2022 MSBuild;
+6. performs an MSI administrative extraction and compares all application
    files with the validated runtime;
-8. writes an independent `.msi.sha256` file and an MSI metadata manifest while
+7. writes an independent `.msi.sha256` file and an MSI metadata manifest while
    retaining the `.wixpdb` for diagnostics.
+
+The administrative extraction is a package-integrity check, not an application
+test. Use the commands in sections 3, 6, 7, and 8 when dependency tests,
+application unit tests, restricted-`PATH` runtime smoke, or portable extraction
+behaviour need to be exercised.
+
+After accepting the WiX EULA, both public packages can be built together:
+
+~~~cmd
+cmake --workflow --preset packages-release
+~~~
 
 Outputs are written to:
 
@@ -503,9 +529,14 @@ release endpoint and directing users to a different binary product.
 ## 10. Create a stable GitHub Release
 
 The stable release workflow is separate from the legacy continuous/nightly
-workflow. It accepts only `v4.0.0` and `v4.0.0-rc.<number>` tags, rebuilds the
-verified Windows assets from the tagged commit, validates their checksums and
-creates a Draft GitHub Release. It never publishes the draft automatically.
+workflow. It accepts only `v4.0.0` and `v4.0.0-rc.<number>` tags, builds the
+Windows assets from the tagged commit, validates their structure and checksums,
+and creates a Draft GitHub Release. It never publishes the draft automatically.
+The called Windows build job builds and stages the five dependencies, publishes
+their aggregate, builds SQLiteBrowser, and creates the portable SFX and MSI. It
+does not run dependency suites, application unit tests, restricted-`PATH`
+runtime smoke, or portable extraction verification; developers run those using
+the explicit commands documented above before creating a release tag.
 
 Run a release-candidate rehearsal first:
 

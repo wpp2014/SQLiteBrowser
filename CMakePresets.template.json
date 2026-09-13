@@ -145,10 +145,24 @@
       "jobs": 0
     },
     {
+      "name": "portable-sfx-verify-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_portable_sfx_verify"],
+      "jobs": 0
+    },
+    {
       "name": "msi-release",
       "configurePreset": "release",
       "configuration": "Release",
       "targets": ["sqlitebrowser_msi"],
+      "jobs": 0
+    },
+    {
+      "name": "packages-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": ["sqlitebrowser_packages"],
       "jobs": 0
     }
   ],
@@ -279,7 +293,7 @@
     },
     {
       "name": "portable-sfx-release",
-      "displayName": "Configure, smoke-test, build, and verify the Release x64 portable SFX",
+      "displayName": "Configure and build the Release x64 portable SFX",
       "steps": [
         {
           "type": "configure",
@@ -292,8 +306,22 @@
       ]
     },
     {
+      "name": "portable-sfx-verify-release",
+      "displayName": "Configure, build, and manually verify the Release x64 portable SFX",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "portable-sfx-verify-release"
+        }
+      ]
+    },
+    {
       "name": "msi-release",
-      "displayName": "Configure, smoke-test, build, and verify the Release x64 MSI",
+      "displayName": "Configure, build, and validate the Release x64 MSI",
       "steps": [
         {
           "type": "configure",
@@ -302,6 +330,20 @@
         {
           "type": "build",
           "name": "msi-release"
+        }
+      ]
+    },
+    {
+      "name": "packages-release",
+      "displayName": "Configure and build the Release x64 portable SFX and MSI",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "packages-release"
         }
       ]
     }

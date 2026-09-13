@@ -21,7 +21,7 @@ function(sqlitebrowser_add_windows_msi)
     endif()
     if(NOT TARGET "${MSI_RUNTIME_TARGET}")
         message(FATAL_ERROR
-            "MSI runtime verification target does not exist: ${MSI_RUNTIME_TARGET}")
+            "MSI runtime assembly target does not exist: ${MSI_RUNTIME_TARGET}")
     endif()
     if(NOT EXISTS "${MSI_WIX_PROJECT}")
         message(FATAL_ERROR "WiX project does not exist: ${MSI_WIX_PROJECT}")

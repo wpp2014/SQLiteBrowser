@@ -12,10 +12,11 @@ one-time decision, run the MSI workflow from the repository root:
 cmake --workflow --preset msi-release
 ```
 
-Alternatively run `build.cmd` from this directory. The workflow builds and
-smoke-tests the Release runtime, validates `runtime-manifest.txt`, builds the
-MSI, retains its `.wixpdb`, performs an administrative extraction, and compares
-the extracted application files with the validated runtime.
+Alternatively run `build.cmd` from this directory. The workflow builds the
+Release runtime, validates `runtime-manifest.txt`, builds the MSI, retains its
+`.wixpdb`, performs an administrative extraction, and compares the extracted
+application files with the validated runtime. It does not run dependency,
+application, or restricted-`PATH` runtime tests.
 
 Outputs are written below:
 

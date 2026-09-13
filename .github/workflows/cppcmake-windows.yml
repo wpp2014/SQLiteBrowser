@@ -276,17 +276,6 @@ jobs:
             throw 'Dependency build failed.'
           }
 
-      - name: Test dependencies
-        run: |
-          powershell -NoProfile -ExecutionPolicy Bypass `
-            -File third_party\build-all.ps1 `
-            -Action Test `
-            -Configuration $env:BUILD_CONFIGURATION `
-            -OpenSSLTestMode Safe
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Dependency tests failed.'
-          }
-
       - name: Publish and verify dependency aggregate
         run: |
           third_party\aggregate.cmd build release
@@ -299,25 +288,18 @@ jobs:
             throw 'Dependency aggregate verification failed.'
           }
 
-      - name: Build and run application unit tests
+      - name: Configure SQLiteBrowser
         run: |
-          cmake --workflow --preset test-release
+          cmake --preset release
           if ($LASTEXITCODE -ne 0) {
-            throw 'Application unit tests failed.'
+            throw 'SQLiteBrowser Release configuration failed.'
           }
 
-      - name: Build and run restricted-PATH runtime smoke tests
+      - name: Build SQLiteBrowser
         run: |
-          cmake --workflow --preset smoke-release
+          cmake --build --preset release
           if ($LASTEXITCODE -ne 0) {
-            throw 'Runtime smoke tests failed.'
-          }
-
-      - name: Build and verify portable SFX
-        run: |
-          cmake --workflow --preset portable-sfx-release
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Portable SFX build and verification failed.'
+            throw 'SQLiteBrowser Release build failed.'
           }
 
       - name: Accept WiX OSMF EULA for CI user
@@ -349,11 +331,11 @@ jobs:
             throw 'Failed to accept WiX OSMF EULA for the CI user.'
           }
 
-      - name: Build and verify MSI
+      - name: Build portable SFX and MSI
         run: |
-          cmake --workflow --preset msi-release
+          cmake --build --preset packages-release
           if ($LASTEXITCODE -ne 0) {
-            throw 'MSI build and verification failed.'
+            throw 'Release package build failed.'
           }
 
       - name: Validate final release assets
@@ -478,7 +460,7 @@ jobs:
           "- Runner: ``$env:ImageOS $env:ImageVersion``" >> $env:GITHUB_STEP_SUMMARY
           "- Qt: ``$env:QT_VERSION $env:QT_ARCH``" >> $env:GITHUB_STEP_SUMMARY
           "- Windows SDK: ``$env:WINDOWS_SDK_VERSION``" >> $env:GITHUB_STEP_SUMMARY
-          "- OpenSSL tests: ``Safe``" >> $env:GITHUB_STEP_SUMMARY
+          "- Automated tests: ``Not run (manual developer command)``" >> $env:GITHUB_STEP_SUMMARY
           "- Configuration: ``$env:BUILD_CONFIGURATION x64``" >> $env:GITHUB_STEP_SUMMARY
 
           $manifests = Get-ChildItem -LiteralPath output `
@@ -497,7 +479,7 @@ jobs:
           }
 
       - if: always()
-        name: Upload build manifests and test diagnostics
+        name: Upload build manifests and configure diagnostics
         uses: actions/upload-artifact@v7
         with:
           name: windows-v4-release-diagnostics-${{ github.run_attempt }}
@@ -507,5 +489,4 @@ jobs:
             output/**/build-manifest.txt
             output/**/runtime-manifest.txt
             output/**/package/metadata/*.txt
-            output/**/Testing/Temporary/**
             output/**/CMakeFiles/CMakeConfigureLog.yaml
