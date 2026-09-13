@@ -1,0 +1,142 @@
+name: Release Windows v4
+
+on:
+  push:
+    tags:
+      - 'v4.0.0'
+      - 'v4.0.0-rc.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-v4-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build verified Windows release assets
+    uses: ./.github/workflows/cppcmake-windows.yml
+
+  draft-release:
+    name: Create draft GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: '4.0.0'
+      RELEASE_DIR: release-assets
+
+    steps:
+      - name: Validate protected release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME" != "v${RELEASE_VERSION}" && \
+                ! "$GITHUB_REF_NAME" =~ ^v${RELEASE_VERSION}-rc\.[0-9]+$ ]]; then
+            echo "::error::Unsupported release tag: $GITHUB_REF_NAME"
+            exit 1
+          fi
+
+          object_type="$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}" --jq '.object.type')"
+          tag_commit="$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}" --jq '.object.sha')"
+          while [[ "$object_type" == 'tag' ]]; do
+            object_type="$(gh api "/repos/${GITHUB_REPOSITORY}/git/tags/${tag_commit}" --jq '.object.type')"
+            tag_commit="$(gh api "/repos/${GITHUB_REPOSITORY}/git/tags/${tag_commit}" --jq '.object.sha')"
+          done
+          if [[ "$object_type" != 'commit' ]]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} resolves to unsupported object type ${object_type}."
+            exit 1
+          fi
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} resolves to ${tag_commit}, not workflow commit ${GITHUB_SHA}."
+            exit 1
+          fi
+
+      - name: Download the two verified package artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RELEASE_DIR"
+
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "windows-v4-release-portable-sfx-${GITHUB_RUN_ATTEMPT}" \
+            --dir "$RELEASE_DIR"
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "windows-v4-release-msi-${GITHUB_RUN_ATTEMPT}" \
+            --dir "$RELEASE_DIR"
+
+      - name: Verify the exact release file set and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base="DB.Browser.for.SQLCipher-${RELEASE_VERSION}-win-x64"
+          expected=(
+            "${base}-portable.exe"
+            "${base}-portable.exe.sha256"
+            "${base}.msi"
+            "${base}.msi.sha256"
+          )
+
+          mapfile -t actual < <(
+            find "$RELEASE_DIR" -maxdepth 1 -type f -printf '%f\n' | sort
+          )
+          mapfile -t wanted < <(printf '%s\n' "${expected[@]}" | sort)
+          if [[ "$(printf '%s\n' "${actual[@]}")" != \
+                "$(printf '%s\n' "${wanted[@]}")" ]]; then
+            echo '::error::Release artifact set does not contain exactly the four expected files.'
+            printf 'Expected:\n  %s\n' "${wanted[@]}"
+            printf 'Actual:\n  %s\n' "${actual[@]}"
+            exit 1
+          fi
+
+          (
+            cd "$RELEASE_DIR"
+            sha256sum --check "${base}-portable.exe.sha256"
+            sha256sum --check "${base}.msi.sha256"
+          )
+
+      - name: Load release notes from the tagged commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github.raw+json' \
+            "/repos/${GITHUB_REPOSITORY}/contents/docs/releases/v4.0.0.md?ref=${GITHUB_SHA}" \
+            > release-notes.md
+
+      - name: Create draft release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::A GitHub release already exists for ${GITHUB_REF_NAME}; refusing to replace it."
+            exit 1
+          fi
+
+          base="DB.Browser.for.SQLCipher-${RELEASE_VERSION}-win-x64"
+          release_args=(
+            "$GITHUB_REF_NAME"
+            "$RELEASE_DIR/${base}-portable.exe"
+            "$RELEASE_DIR/${base}-portable.exe.sha256"
+            "$RELEASE_DIR/${base}.msi"
+            "$RELEASE_DIR/${base}.msi.sha256"
+            --repo "$GITHUB_REPOSITORY"
+            --verify-tag
+            --draft
+            --title "DB Browser for SQLCipher ${GITHUB_REF_NAME#v}"
+            --notes-file release-notes.md
+          )
+          if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then
+            release_args+=(--prerelease)
+          fi
+
+          gh release create "${release_args[@]}"

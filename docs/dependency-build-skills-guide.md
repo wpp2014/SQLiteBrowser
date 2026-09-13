@@ -1,6 +1,6 @@
 # 依赖构建 Skill 使用指南
 
-> 适用分支：`upgrade/v4.0.0`
+> 适用版本：`master` 或 `v4.0.0` tag
 >
 > 适用平台：Windows x64
 >

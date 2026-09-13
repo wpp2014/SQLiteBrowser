@@ -201,8 +201,13 @@ file(MAKE_DIRECTORY
 set(_artifact_base
     "DB.Browser.for.SQLCipher-${SQLITEBROWSER_MSI_VERSION}-win-x64")
 set(_msi_path "${SQLITEBROWSER_MSI_ARTIFACT_DIR}/${_artifact_base}.msi")
+set(_msi_checksum_path "${_msi_path}.sha256")
 set(_wix_pdb_path
     "${SQLITEBROWSER_MSI_ARTIFACT_DIR}/${_artifact_base}.wixpdb")
+
+# A previous local build must not be able to satisfy the output checks for a
+# failed WiX invocation.
+file(REMOVE "${_msi_path}" "${_msi_checksum_path}" "${_wix_pdb_path}")
 
 message(STATUS
     "Building MSI with WixToolset.Sdk ${SQLITEBROWSER_MSI_WIX_VERSION}")
@@ -295,7 +300,14 @@ foreach(_relative_path IN LISTS _manifest_paths)
 endforeach()
 
 file(SHA256 "${_msi_path}" _msi_hash)
+string(TOLOWER "${_msi_hash}" _msi_hash)
 file(SIZE "${_msi_path}" _msi_size)
+file(WRITE "${_msi_checksum_path}"
+    "${_msi_hash}  ${_artifact_base}.msi\n")
+if(NOT EXISTS "${_msi_checksum_path}")
+    message(FATAL_ERROR
+        "Failed to write the MSI checksum: ${_msi_checksum_path}")
+endif()
 execute_process(
     COMMAND git -C "${SQLITEBROWSER_MSI_SOURCE_DIR}" rev-parse HEAD
     OUTPUT_VARIABLE _git_commit
@@ -321,4 +333,5 @@ file(WRITE
     "${_msi_manifest}")
 
 message(STATUS "SQLiteBrowser MSI verified: ${_msi_path}")
+message(STATUS "SQLiteBrowser MSI checksum: ${_msi_checksum_path}")
 message(STATUS "WiX debug database retained: ${_wix_pdb_path}")

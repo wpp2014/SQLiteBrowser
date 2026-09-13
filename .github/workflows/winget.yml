@@ -1,8 +1,9 @@
-name: Publish to WinGet
+name: Publish to WinGet (manual only)
 
 on:
-  release:
-    types: [released]
+  # v4.0.0 is a SQLCipher-only fork release and must not be submitted under
+  # the upstream DB Browser for SQLite package identifier automatically.
+  workflow_dispatch:
 
 permissions:
   contents: read

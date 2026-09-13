@@ -293,17 +293,26 @@ Or with the `nix-env` or `nix-shell` commands:
 
 ## Compiling
 
-The `upgrade/v4.0.0` branch currently supports Windows x64 only. It uses
+The v4 build on `master` supports Windows x64 only. It uses
 Visual Studio 2022, Qt 6.11.1, the repository-pinned dependency sources, and
-CMake Presets. The older cross-platform instructions in [BUILDING](BUILDING.md)
-do not describe this branch.
+CMake Presets. Released source can also be checked out by its `v4.0.0` tag.
+The older cross-platform instructions in [BUILDING](BUILDING.md) do not
+describe this build path.
 
-### Windows v4 branch
+### Windows v4
 
 For prerequisites, dependency build order, local Preset setup, application
-builds, tests, package runtime assembly, ZIP, portable self-extracting EXE,
-WiX MSI creation, and troubleshooting, follow the
+builds, tests, package runtime assembly, portable self-extracting EXE, WiX MSI
+creation, stable Release workflow, and troubleshooting, follow the
 [Windows v4 build guide](docs/windows-v4-build-guide.md).
+
+The public v4.0.0 binary formats are the portable SFX and WiX MSI. Both require
+the latest compatible Microsoft Visual C++ x64 Runtime. The packages are not
+Authenticode-signed, so Windows can display an unknown-publisher or SmartScreen
+warning; verify downloads with the accompanying SHA-256 files.
+
+See the [v4.0.0 release notes](docs/releases/v4.0.0.md) for the supported
+platform, pinned dependency versions, packaging choices, and known limitations.
 
 For AI-assisted Brotli, zlib, zstd, OpenSSL, and SQLCipher workflows, see the
 [dependency build skills guide](docs/dependency-build-skills-guide.md).
