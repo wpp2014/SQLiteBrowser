@@ -356,6 +356,98 @@ jobs:
             throw 'MSI build and verification failed.'
           }
 
+      - name: Validate final release assets
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $cmakeSource = [IO.File]::ReadAllText(
+            (Join-Path $env:GITHUB_WORKSPACE 'CMakeLists.txt')
+          )
+          $versionMatch = [regex]::Match(
+            $cmakeSource,
+            '(?ms)project\s*\(\s*sqlitebrowser\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)'
+          )
+          if (-not $versionMatch.Success) {
+            throw 'Unable to read the release version from CMakeLists.txt.'
+          }
+
+          $version = $versionMatch.Groups[1].Value
+          $cachePath = Join-Path $env:GITHUB_WORKSPACE `
+            'output\x64-shared-release\build\sqlitebrowser\CMakeCache.txt'
+          $cache = [IO.File]::ReadAllText($cachePath)
+          if ($cache -notmatch '(?m)^BUILD_STABLE_VERSION:BOOL=ON\r?$') {
+            throw 'Release was not configured with BUILD_STABLE_VERSION=ON.'
+          }
+          if ($cache -notmatch '(?m)^SQLITEBROWSER_ENABLE_UPDATE_CHECK:BOOL=OFF\r?$') {
+            throw 'The upstream update check is enabled in the v4 release build.'
+          }
+
+          $runtimeExe = Join-Path $env:GITHUB_WORKSPACE `
+            'output\x64-shared-release\package\runtime\DB Browser for SQLCipher.exe'
+          $versionInfo = (Get-Item -LiteralPath $runtimeExe).VersionInfo
+          $expectedFileVersion = "$version.0"
+          if ($versionInfo.FileVersion -cne $expectedFileVersion -or
+              $versionInfo.ProductVersion -cne $expectedFileVersion) {
+            throw "Application version mismatch. Expected $expectedFileVersion; got FileVersion=$($versionInfo.FileVersion), ProductVersion=$($versionInfo.ProductVersion)."
+          }
+
+          $artifactDir = Join-Path $env:GITHUB_WORKSPACE `
+            'output\x64-shared-release\package\artifacts'
+          $baseName = "DB.Browser.for.SQLCipher-$version-win-x64"
+          $expectedNames = @(
+            "$baseName-portable.exe",
+            "$baseName-portable.exe.sha256",
+            "$baseName.msi",
+            "$baseName.msi.sha256"
+          )
+
+          foreach ($name in $expectedNames) {
+            $path = Join-Path $artifactDir $name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Required release asset is missing: $path"
+            }
+          }
+
+          foreach ($payloadName in @("$baseName-portable.exe", "$baseName.msi")) {
+            $payloadPath = Join-Path $artifactDir $payloadName
+            $checksumPath = "$payloadPath.sha256"
+            $checksumLine = [IO.File]::ReadAllText($checksumPath).Trim()
+            $checksumMatch = [regex]::Match(
+              $checksumLine,
+              '^([0-9a-fA-F]{64})  ([^\\/]+)$'
+            )
+            if (-not $checksumMatch.Success) {
+              throw "Malformed SHA-256 file: $checksumPath"
+            }
+            if ($checksumMatch.Groups[2].Value -cne $payloadName) {
+              throw "SHA-256 filename mismatch in $checksumPath"
+            }
+
+            $expectedHash = $checksumMatch.Groups[1].Value.ToLowerInvariant()
+            $actualHash = (Get-FileHash -LiteralPath $payloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -cne $expectedHash) {
+              throw "SHA-256 mismatch for $payloadPath"
+            }
+          }
+
+          $publicFiles = @(
+            Get-ChildItem -LiteralPath $artifactDir -File |
+              Where-Object {
+                $_.Name -match '\.(msi|sha256)$' -or
+                $_.Name -match '-portable\.exe$'
+              } |
+              Select-Object -ExpandProperty Name
+          )
+          $unexpectedFiles = @($publicFiles | Where-Object { $_ -notin $expectedNames })
+          if ($unexpectedFiles.Count -ne 0) {
+            throw "Unexpected public release assets:`n  $($unexpectedFiles -join "`n  ")"
+          }
+          if ($publicFiles.Count -ne $expectedNames.Count) {
+            throw "Expected exactly $($expectedNames.Count) public release assets; found $($publicFiles.Count)."
+          }
+
+          Write-Host "Validated the four release assets for version $version."
+
       - if: always()
         name: Upload portable SFX artifacts
         uses: actions/upload-artifact@v7
@@ -366,7 +458,6 @@ jobs:
           path: |
             output/**/package/artifacts/*-portable.exe
             output/**/package/artifacts/*-portable.exe.sha256
-            output/**/package/metadata/portable-sfx-manifest.txt
 
       - if: always()
         name: Upload MSI artifacts
@@ -378,7 +469,6 @@ jobs:
           path: |
             output/**/package/artifacts/*.msi
             output/**/package/artifacts/*.msi.sha256
-            output/**/package/metadata/msi-manifest.txt
 
       - if: always()
         name: Write job summary
@@ -416,5 +506,6 @@ jobs:
           path: |
             output/**/build-manifest.txt
             output/**/runtime-manifest.txt
+            output/**/package/metadata/*.txt
             output/**/Testing/Temporary/**
             output/**/CMakeFiles/CMakeConfigureLog.yaml

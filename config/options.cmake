@@ -10,6 +10,9 @@ OPTION(customTap "Using SQLCipher, SQLite and Qt installed through our custom Ho
 OPTION(SQLITEBROWSER_DEPLOY_RUNTIME
     "Deploy and validate the Windows runtime next to the application after linking"
     ON)
+OPTION(SQLITEBROWSER_ENABLE_UPDATE_CHECK
+    "Enable the upstream DB Browser version check UI and automatic request"
+    ON)
 
 set(SQLITEBROWSER_TLS_SMOKE_URL
     "https://download.sqlitebrowser.org/currentrelease"
